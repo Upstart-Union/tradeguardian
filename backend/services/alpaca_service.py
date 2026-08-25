@@ -13,3 +13,7 @@ trading_client = TradingClient(
 def get_account():
     """Fetch the Alpaca paper trading account."""
     return trading_client.get_account()
+
+def get_positions():
+    """Fetch all current positions from the Alpaca paper account."""
+    return trading_client.get_all_positions()

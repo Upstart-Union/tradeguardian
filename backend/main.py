@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from routes.account import router as account_router
+from routes.portfolio import router as portfolio_router
 
 app = FastAPI(
     title="TradeGuardian API",
@@ -7,6 +8,7 @@ app = FastAPI(
     version="0.1.0",
 )
 app.include_router(account_router)
+app.include_router(portfolio_router)
 
 @app.get("/")
 def root():
