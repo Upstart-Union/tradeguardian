@@ -27,6 +27,7 @@ def analyze_trade(proposal: TradeProposal):
     positions = get_positions()
 
     account_equity = float(account.equity)
+    buying_power = float(account.buying_power)
 
     symbol = proposal.symbol.upper()
     price = round(get_latest_price(symbol), 2)
@@ -46,6 +47,7 @@ def analyze_trade(proposal: TradeProposal):
             existing_quantity = float(position.qty)
             break
 
+    # Calculate projected position after the proposed trade
     if proposal.side.value == "buy":
         projected_quantity = (
             existing_quantity + proposal.quantity
@@ -66,6 +68,7 @@ def analyze_trade(proposal: TradeProposal):
             existing_position_value - trade_value,
         )
 
+    # Validate sell quantity
     sell_validation = None
 
     if proposal.side.value == "sell":
@@ -81,14 +84,18 @@ def analyze_trade(proposal: TradeProposal):
         else:
             sell_validation = {
                 "valid": True,
-                "reason": "Sell quantity is within the current position.",
+                "reason": (
+                    "Sell quantity is within the current position."
+                ),
             }
 
+    # Calculate projected portfolio concentration
     projected_concentration_percent = round(
         (projected_position_value / account_equity) * 100,
         2,
     )
-    
+
+    # Evaluate the trade
     if proposal.side.value == "buy":
         risk_decision = evaluate_risk(
             trade_exposure_percent=trade_percent_of_equity,
@@ -96,6 +103,18 @@ def analyze_trade(proposal: TradeProposal):
                 projected_concentration_percent
             ),
         )
+
+        # Buying power validation
+        if trade_value > buying_power:
+            risk_decision = GuardianDecision(
+                status=DecisionStatus.BLOCKED,
+                reasons=[
+                    f"Trade value of ${trade_value:,.2f} exceeds "
+                    f"available buying power of "
+                    f"${buying_power:,.2f}."
+                ],
+            )
+
     else:
         risk_decision = GuardianDecision(
             status=DecisionStatus.APPROVED,
@@ -105,6 +124,7 @@ def analyze_trade(proposal: TradeProposal):
             ],
         )
 
+    # Oversell protection takes priority
     if sell_validation and not sell_validation["valid"]:
         risk_decision = GuardianDecision(
             status=DecisionStatus.BLOCKED,
@@ -129,6 +149,7 @@ def analyze_trade(proposal: TradeProposal):
             projected_quantity=projected_quantity,
 
             account_equity=account_equity,
+            buying_power=buying_power,
             trade_percent_of_equity=trade_percent_of_equity,
 
             existing_position_value=existing_position_value,

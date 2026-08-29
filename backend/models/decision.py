@@ -25,6 +25,7 @@ class RiskMetrics(BaseModel):
     projected_quantity: float
 
     account_equity: float
+    buying_power: float
     trade_percent_of_equity: float
 
     existing_position_value: float
