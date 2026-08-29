@@ -4,7 +4,9 @@ from routes.account import router as account_router
 from routes.portfolio import router as portfolio_router
 from routes.analyze import router as analyze_router
 from routes.history import router as history_router
+from core.database import initialize_database
 
+initialize_database()
 
 app = FastAPI(
     title="TradeGuardian API",
