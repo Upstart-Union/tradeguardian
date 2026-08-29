@@ -1,4 +1,5 @@
 # TradeGuardian risk thresholds
+from models.decision import DecisionStatus, GuardianDecision
 
 MAX_TRADE_EXPOSURE_PERCENT = 15.0
 FLAG_TRADE_EXPOSURE_PERCENT = 5.0
@@ -10,7 +11,7 @@ FLAG_CONCENTRATION_PERCENT = 10.0
 def evaluate_risk(
     trade_exposure_percent: float,
     projected_concentration_percent: float,
-) -> dict:
+) -> GuardianDecision:
     """
     Evaluate a proposed trade against TradeGuardian risk policies.
 
@@ -67,7 +68,7 @@ def evaluate_risk(
             "Trade is within the current TradeGuardian risk limits."
         )
 
-    return {
-        "decision": decision,
-        "reasons": reasons,
-    }
+    return GuardianDecision(
+        status=DecisionStatus(decision),
+        reasons=reasons,
+    )

@@ -7,6 +7,13 @@ from services.alpaca_service import (
     get_positions,
 )
 from policies.risk_policy import evaluate_risk
+from models.decision import (
+    AnalysisResult,
+    DecisionStatus,
+    GuardianDecision,
+    RiskMetrics,
+)
+from services.history_service import save_analysis
 
 router = APIRouter(
     prefix="/analyze",
@@ -90,44 +97,54 @@ def analyze_trade(proposal: TradeProposal):
             ),
         )
     else:
-        risk_decision = {
-            "decision": "APPROVED",
-            "reasons": [
+        risk_decision = GuardianDecision(
+            status=DecisionStatus.APPROVED,
+            reasons=[
                 "Sell order reduces the existing position and "
                 "does not increase portfolio exposure."
             ],
-        }
+        )
 
     if sell_validation and not sell_validation["valid"]:
-        risk_decision = {
-            "decision": "BLOCKED",
-            "reasons": [
+        risk_decision = GuardianDecision(
+            status=DecisionStatus.BLOCKED,
+            reasons=[
                 sell_validation["reason"],
             ],
-        }
+        )
 
-    return {
-        "message": "Trade proposal analyzed",
-        "proposal": {
+    result = AnalysisResult(
+        message="Trade proposal analyzed",
+
+        proposal={
             "symbol": symbol,
             "side": proposal.side.value,
             "quantity": proposal.quantity,
             "current_price": price,
             "trade_value": trade_value,
         },
-        "risk_metrics": {
-            "existing_quantity": existing_quantity,
-            "projected_quantity": projected_quantity,
-            "account_equity": account_equity,
-            "trade_percent_of_equity": trade_percent_of_equity,
-            "existing_position_value": existing_position_value,
-            "projected_position_value": round(
+
+        risk_metrics=RiskMetrics(
+            existing_quantity=existing_quantity,
+            projected_quantity=projected_quantity,
+
+            account_equity=account_equity,
+            trade_percent_of_equity=trade_percent_of_equity,
+
+            existing_position_value=existing_position_value,
+            projected_position_value=round(
                 projected_position_value,
                 2,
             ),
-            "projected_concentration_percent": (
+
+            projected_concentration_percent=(
                 projected_concentration_percent
             ),
-        },
-        "decision": risk_decision,
-    }
+        ),
+
+        decision=risk_decision,
+    )
+
+    save_analysis(result)
+
+    return result
