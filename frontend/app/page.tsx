@@ -31,10 +31,67 @@ type Asset = {
   tradable: boolean;
 };
 
+type RiskCheckStatus =
+  "PASS" | "FAIL";
+
+type RiskCheckResult = {
+  status: RiskCheckStatus;
+  reason: string;
+};
+
+type AnalysisResult = {
+  audit_id: string;
+  timestamp: string;
+  message: string;
+
+  proposal: {
+    symbol: string;
+    side: string;
+    quantity: number;
+    current_price: number;
+    trade_value: number;
+  };
+
+  risk_metrics: {
+    existing_quantity: number;
+    projected_quantity: number;
+    account_equity: number;
+    buying_power: number;
+    trade_percent_of_equity: number;
+    existing_position_value: number;
+    projected_position_value: number;
+    projected_concentration_percent: number;
+  };
+
+  risk_checks: {
+    exposure: RiskCheckResult;
+    concentration: RiskCheckResult;
+    buying_power: RiskCheckResult;
+    position: RiskCheckResult;
+  };
+
+  decision: {
+    status: string;
+    reasons: string[];
+  };
+};
+
 export default function Home() {
   const [symbol, setSymbol] = useState("AAPL");
   const [side, setSide] = useState("buy");
   const [quantity, setQuantity] = useState("10");
+
+  const [orderType, setOrderType] =
+    useState<"market" | "limit">("market");
+
+  const [entryPrice, setEntryPrice] =
+    useState("");
+
+  const [stopLoss, setStopLoss] =
+    useState("");
+
+  const [takeProfit, setTakeProfit] =
+    useState("");
 
   const [timeframe, setTimeframe] =
     useState("1M");
@@ -51,11 +108,15 @@ export default function Home() {
   const [marketSearch, setMarketSearch] =
     useState("");
 
-  const [marketStartIndex, setMarketStartIndex] =
+  const [marketScrollTop, setMarketScrollTop] =
     useState(0);
 
-  const [marketLoadedIndices, setMarketLoadedIndices] =
-    useState<number[]>([]);
+  const [loadedMarketIndices, setLoadedMarketIndices] =
+    useState<Set<number>>(
+      () => new Set(),
+    );
+  const MARKET_ROW_HEIGHT = 46;
+  const MARKET_VISIBLE_ROWS = 6;
 
   const [assets, setAssets] =
     useState<Asset[]>([]);
@@ -73,7 +134,7 @@ export default function Home() {
     useState(false);
 
   const [analysisResult, setAnalysisResult] =
-    useState<any>(null);
+    useState<AnalysisResult | null>(null);
 
   useEffect(() => {
     async function loadAssets() {
@@ -157,6 +218,18 @@ export default function Home() {
   }, [symbol, timeframe]);
 
   async function analyzeTrade() {
+    const parsedQuantity = Number(quantity);
+
+    if (
+      !Number.isFinite(parsedQuantity) ||
+      parsedQuantity <= 0
+    ) {
+      alert(
+        "Please enter a valid quantity.",
+      );
+
+      return;
+    }
     try {
       setAnalysisLoading(true);
 
@@ -172,7 +245,20 @@ export default function Home() {
           body: JSON.stringify({
             symbol,
             side,
-            quantity: Number(quantity),
+            quantity: parsedQuantity,
+            order_type: orderType,
+            entry_price:
+              entryPrice.trim() === ""
+                ? null
+                : Number(entryPrice),
+            stop_loss:
+              stopLoss.trim() === ""
+                ? null
+                : Number(stopLoss),
+            take_profit:
+              takeProfit.trim() === ""
+                ? null
+                : Number(takeProfit),
           }),
         },
       );
@@ -199,6 +285,12 @@ export default function Home() {
         error,
       );
 
+      alert(
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
+
     } finally {
       setAnalysisLoading(false);
     }
@@ -222,6 +314,228 @@ export default function Home() {
           .includes(query)
       );
     });
+
+  const marketStartIndex =
+    Math.floor(
+      marketScrollTop /
+        MARKET_ROW_HEIGHT,
+    );
+
+  const marketEndIndex =
+    Math.min(
+      filteredAssets.length,
+      marketStartIndex +
+        MARKET_VISIBLE_ROWS +
+        2,
+    );
+
+  const virtualAssets =
+    filteredAssets.slice(
+      marketStartIndex,
+      marketEndIndex,
+    );
+
+  const topSpacerHeight =
+    marketStartIndex *
+    MARKET_ROW_HEIGHT;
+
+  const bottomSpacerHeight =
+    Math.max(
+      0,
+      (
+        filteredAssets.length -
+        marketEndIndex
+      ) *
+        MARKET_ROW_HEIGHT,
+    );
+
+  useEffect(() => {
+    if (!marketMenuOpen) {
+      return;
+    }
+
+    const visibleIndices =
+      virtualAssets.map(
+        (_, index) =>
+          marketStartIndex + index,
+      );
+
+    const timer = window.setTimeout(() => {
+      setLoadedMarketIndices(
+        (previous) => {
+          const next = new Set(previous);
+
+          visibleIndices.forEach(
+            (index) => {
+              next.add(index);
+            },
+          );
+
+          return next;
+        },
+      );
+    }, 180);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [
+    marketMenuOpen,
+    marketStartIndex,
+    virtualAssets.length,
+  ]);
+
+  const currentMarketPrice =
+    marketData?.latest_price ??
+    analysisResult?.proposal.current_price ??
+    0;
+
+  const parsedStopLoss =
+    stopLoss.trim() === ""
+      ? null
+      : Number(stopLoss);
+
+  const parsedTakeProfit =
+    takeProfit.trim() === ""
+      ? null
+      : Number(takeProfit);
+
+  const effectiveEntryPrice =
+    orderType === "market"
+      ? currentMarketPrice
+      : Number(entryPrice);
+
+  const hasValidEntryPrice =
+    Number.isFinite(effectiveEntryPrice) &&
+    effectiveEntryPrice > 0;
+
+  const riskAmount =
+    hasValidEntryPrice &&
+    parsedStopLoss !== null
+      ? Math.abs(
+          effectiveEntryPrice -
+          parsedStopLoss,
+        )
+      : null;
+
+  const rewardAmount =
+    hasValidEntryPrice &&
+    parsedTakeProfit !== null
+      ? Math.abs(
+          parsedTakeProfit -
+          effectiveEntryPrice,
+        )
+      : null;
+
+  const riskRewardRatio =
+    riskAmount &&
+    riskAmount > 0 &&
+    rewardAmount !== null
+      ? rewardAmount / riskAmount
+      : null;
+
+  const stopLossValid =
+    parsedStopLoss === null
+      ? null
+      : side === "buy"
+        ? parsedStopLoss < effectiveEntryPrice
+        : parsedStopLoss > effectiveEntryPrice;
+
+  const stopLossPercent =
+    parsedStopLoss !== null &&
+    effectiveEntryPrice > 0
+      ? (
+          ((parsedStopLoss -
+            effectiveEntryPrice) /
+            effectiveEntryPrice) *
+          100
+        )
+      : null;
+
+  const takeProfitPercent =
+    parsedTakeProfit !== null &&
+    effectiveEntryPrice > 0
+      ? (
+          ((parsedTakeProfit -
+            effectiveEntryPrice) /
+            effectiveEntryPrice) *
+          100
+        )
+      : null;
+
+  const guardianRisk = (() => {
+    if (!analysisResult) {
+      return null;
+    }
+
+    let score = 0;
+
+    // Backend risk check failures
+    const backendChecks = [
+      analysisResult.risk_checks.exposure,
+      analysisResult.risk_checks.position,
+      analysisResult.risk_checks.concentration,
+      analysisResult.risk_checks.buying_power,
+    ];
+
+    const failedChecks =
+      backendChecks.filter(
+        (check) => check.status === "FAIL",
+      ).length;
+
+    score += failedChecks * 25;
+
+
+    // Stop loss protection
+    if (parsedStopLoss === null) {
+      score += 30;
+    } else if (!stopLossValid) {
+      score += 50;
+    }
+
+
+    // Risk / reward
+    if (
+      riskRewardRatio !== null &&
+      riskRewardRatio < 1
+    ) {
+      score += 15;
+    } else if (
+      riskRewardRatio !== null &&
+      riskRewardRatio < 1.5
+    ) {
+      score += 8;
+    }
+
+
+    score = Math.min(
+      100,
+      Math.round(score),
+    );
+
+
+    const level =
+      score <= 25
+        ? "LOW RISK"
+        : score <= 60
+          ? "MODERATE RISK"
+          : "HIGH RISK";
+
+
+    const status =
+      score <= 25
+        ? "APPROVED"
+        : score <= 60
+          ? "FLAGGED"
+          : "BLOCKED";
+
+
+    return {
+      score,
+      level,
+      status,
+    };
+  })();
 
   return (
     <main className="min-h-screen bg-[#171717] text-[#e5e5e5]">
@@ -514,15 +828,15 @@ export default function Home() {
 
 
           {/* ANALYSIS WORKSPACE */}
-          <section className="flex min-h-0 flex-1 overflow-hidden">
+          <section className="flex min-h-0 flex-1 overflow-visible">
 
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-7 py-3">
+            <div className="flex min-h-0 flex-1 flex-col overflow-visible px-7 py-3">
 
               {/* MARKET + VERIFICATION */}
-              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.75fr)_minmax(390px,1fr)] grid-rows-[minmax(0,1fr)_auto] gap-5">
+              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_280px] gap-4">
 
                 {/* LEFT: MARKET */}
-                <div className="col-start-1 row-start-1 min-h-0 overflow-hidden rounded-md border border-[#272b31] bg-[#101010]">
+                <div className="col-start-1 row-start-1 flex min-h-0 flex-col overflow-hidden rounded-md border border-[#272b31] bg-[#101010]">
 
                   {/* Market Header */}
                   <div className="flex items-start justify-between px-6 pt-7">
@@ -589,7 +903,7 @@ export default function Home() {
 
 
                   {/* Chart */}
-                  <div className="mt-7 h-[calc(100%_-_120px)] min-h-0 px-6 pb-6">
+                  <div className="mt-5 min-h-0 flex-1 px-6 pb-5">
 
                     {marketLoading ? (
 
@@ -624,23 +938,22 @@ export default function Home() {
                 </div>
 
                 {/* TRADE COMMAND BAR */}
-                <section className="col-start-1 row-start-2 min-h-0 rounded-md border border-[#2d2d2d] bg-[#111111] px-5 py-6">
+                <section className="relative z-30 col-start-1 row-start-2 flex min-h-0 flex-col overflow-visible rounded-md border border-[#2d2d2d] bg-[#111111] px-5 py-3">
 
-                  <div className="w-full">
+                  <div className="w-full shrink-0">
 
                     {/* Main Trade Controls */}
-                    <div className="flex items-end gap-7">
+                    <div className="grid grid-cols-3 gap-x-5 gap-y-2">
 
                       {/* Symbol */}
-                      <div className="w-[216px]">
+                      <div className="relative z-50">
 
-                        <label className="mb-3 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
+                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
                           SYMBOL
                         </label>
 
                         <div className="relative">
 
-                          {/* Selected Market */}
                           <button
                             type="button"
                             onClick={() => {
@@ -650,22 +963,11 @@ export default function Home() {
 
                               if (nextOpen) {
                                 setMarketSearch("");
-                                setMarketStartIndex(0);
-
-                                setMarketLoadedIndices(
-                                  Array.from(
-                                    {
-                                      length: Math.min(
-                                        7,
-                                        assets.length,
-                                      ),
-                                    },
-                                    (_, index) => index,
-                                  ),
-                                );
+                                setMarketScrollTop(0);
+                                setLoadedMarketIndices(new Set());
                               }
                             }}
-                            className="flex h-[60px] w-full items-center rounded-md border border-[#353535] bg-[#171717] px-4 text-left text-white transition hover:border-[#4a4a4a] hover:bg-[#1b1b1b]"
+                            className="flex h-[48px] w-full items-center rounded-md border border-[#353535] bg-[#171717] px-4 text-left text-white transition hover:border-[#4a4a4a] hover:bg-[#1b1b1b]"
                             aria-haspopup="listbox"
                             aria-expanded={marketMenuOpen}
                           >
@@ -679,7 +981,7 @@ export default function Home() {
                               }}
                             />
 
-                            <span className="ml-4 text-[16px] font-medium">
+                            <span className="ml-3 text-[15px] font-medium">
                               {symbol}
                             </span>
 
@@ -693,35 +995,22 @@ export default function Home() {
                               fill="none"
                               stroke="currentColor"
                               strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
                             >
                               <path d="m6 9 6 6 6-6" />
                             </svg>
 
                           </button>
 
-                          {/* Market Dropdown */}
+
+                          {/* Keep your existing Market Dropdown here */}
                           {marketMenuOpen && (
                             <div
-                              className="absolute bottom-[68px] left-0 right-0 z-50 overflow-hidden rounded-md border border-[#353535] bg-[#171717] shadow-xl"
+                              className="absolute bottom-full left-0 right-0 z-50 mb-2 overflow-hidden rounded-md border border-[#353535] bg-[#171717] shadow-xl"
                               role="listbox"
                             >
-                              {/* Search */}
+
                               <div className="border-b border-[#303030] p-3">
                                 <div className="relative">
-                                  <svg
-                                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#777777]"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  >
-                                    <circle cx="11" cy="11" r="7" />
-                                    <path d="m20 20-4-4" />
-                                  </svg>
 
                                   <input
                                     type="text"
@@ -731,256 +1020,178 @@ export default function Home() {
                                         event.target.value;
 
                                       setMarketSearch(value);
-                                      setMarketStartIndex(0);
-
-                                      const query =
-                                        value.trim().toLowerCase();
-
-                                      const matchingAssets =
-                                        assets.filter((asset) => {
-                                          if (!query) {
-                                            return true;
-                                          }
-
-                                          return (
-                                            asset.symbol
-                                              .toLowerCase()
-                                              .includes(query) ||
-                                            asset.name
-                                              .toLowerCase()
-                                              .includes(query)
-                                          );
-                                        });
-
-                                      setMarketLoadedIndices(
-                                        Array.from(
-                                          {
-                                            length: Math.min(
-                                              7,
-                                              matchingAssets.length,
-                                            ),
-                                          },
-                                          (_, index) => index,
-                                        ),
+                                      setMarketScrollTop(0);
+                                      setLoadedMarketIndices(
+                                        new Set(),
                                       );
                                     }}
                                     placeholder="Search markets..."
-                                    className="h-10 w-full rounded-md border border-[#353535] bg-[#121212] pl-10 pr-3 text-[13px] text-white outline-none placeholder:text-[#666666] focus:border-[#555555]"
+                                    className="h-10 w-full rounded-md border border-[#353535] bg-[#121212] px-3 text-[13px] text-white outline-none placeholder:text-[#666666]"
                                   />
+
                                 </div>
                               </div>
 
-                              {/* Market viewport */}
                               <div
-                                className="h-[322px] overflow-y-auto overscroll-contain"
+                                className="h-[276px] overflow-y-auto market-scroll"
                                 onScroll={(event) => {
-                                  const rowHeight = 46;
-                                  const visibleRows = 7;
-
-                                  const scrollTop =
-                                    event.currentTarget.scrollTop;
-
-                                  const nextStartIndex = Math.min(
-                                    Math.floor(
-                                      scrollTop / rowHeight,
-                                    ),
-                                    Math.max(
-                                      0,
-                                      filteredAssets.length -
-                                        visibleRows,
-                                    ),
+                                  setMarketScrollTop(
+                                    event.currentTarget.scrollTop,
                                   );
-
-                                  if (
-                                    nextStartIndex ===
-                                    marketStartIndex
-                                  ) {
-                                    return;
-                                  }
-
-                                  setMarketStartIndex(
-                                    nextStartIndex,
-                                  );
-
-                                  /*
-                                  * Only the newly entering row(s)
-                                  * should show a loading placeholder.
-                                  */
-                                  const nextVisibleIndices =
-                                    Array.from(
-                                      {
-                                        length: Math.min(
-                                          visibleRows,
-                                          Math.max(
-                                            0,
-                                            filteredAssets.length -
-                                              nextStartIndex,
-                                          ),
-                                        ),
-                                      },
-                                      (_, index) =>
-                                        nextStartIndex + index,
-                                    );
-
-                                  const missingIndices =
-                                    nextVisibleIndices.filter(
-                                      (index) =>
-                                        !marketLoadedIndices.includes(
-                                          index,
-                                        ),
-                                    );
-
-                                  if (
-                                    missingIndices.length === 0
-                                  ) {
-                                    return;
-                                  }
-
-                                  window.setTimeout(() => {
-                                    setMarketLoadedIndices(
-                                      (current) => [
-                                        ...new Set([
-                                          ...current,
-                                          ...missingIndices,
-                                        ]),
-                                      ],
-                                    );
-                                  }, 180);
                                 }}
                               >
-                                <div
-                                  style={{
-                                    height:
-                                      filteredAssets.length * 46,
-                                    position: "relative",
-                                  }}
-                                >
-                                  {Array.from({
-                                    length: Math.min(
-                                      7,
-                                      Math.max(
-                                        0,
-                                        filteredAssets.length -
-                                          marketStartIndex,
+
+                                {assetsLoading ? (
+
+                                  <div className="space-y-1 p-2">
+
+                                    {Array.from(
+                                      { length: 6 },
+                                      (_, index) => (
+                                        <div
+                                          key={index}
+                                          className="flex h-[46px] items-center gap-3 px-2"
+                                        >
+
+                                          <div className="h-7 w-7 animate-pulse rounded-full bg-[#252525]" />
+
+                                          <div className="flex-1 space-y-2">
+
+                                            <div className="h-3 w-16 animate-pulse rounded bg-[#252525]" />
+
+                                            <div className="h-2 w-28 animate-pulse rounded bg-[#202020]" />
+
+                                          </div>
+
+                                        </div>
                                       ),
-                                    ),
-                                  }).map((_, visibleIndex) => {
-                                    const assetIndex =
-                                      marketStartIndex +
-                                      visibleIndex;
+                                    )}
 
-                                    const asset =
-                                      filteredAssets[
-                                        assetIndex
-                                      ];
+                                  </div>
 
-                                    if (!asset) {
-                                      return null;
-                                    }
+                                ) : filteredAssets.length === 0 ? (
 
-                                    const isLoaded =
-                                      marketLoadedIndices.includes(
-                                        assetIndex,
-                                      );
+                                  <div className="flex h-[120px] items-center justify-center">
 
-                                    return (
-                                      <button
-                                        key={`${asset.symbol}-${assetIndex}`}
-                                        type="button"
-                                        onClick={() => {
-                                          setSymbol(asset.symbol);
-                                          setMarketMenuOpen(false);
-                                          setMarketSearch("");
-                                          setMarketStartIndex(0);
+                                    <span className="text-[13px] text-[#777777]">
+                                      No markets found
+                                    </span>
 
-                                          setMarketLoadedIndices(
-                                            Array.from(
-                                              {
-                                                length: Math.min(
-                                                  7,
-                                                  assets.length,
-                                                ),
-                                              },
-                                              (_, index) => index,
-                                            ),
+                                  </div>
+
+                                ) : (
+
+                                  <>
+                                    <div
+                                      style={{
+                                        height: topSpacerHeight,
+                                      }}
+                                    />
+
+                                    {virtualAssets.map(
+                                      (asset, assetIndex) => {
+                                        const realIndex =
+                                          marketStartIndex + assetIndex;
+
+                                        const isLoaded =
+                                          loadedMarketIndices.has(
+                                            realIndex,
                                           );
-                                        }}
-                                        className={`absolute left-0 w-full ${
-                                          symbol === asset.symbol
-                                            ? "bg-[#1f1f1f]"
-                                            : "hover:bg-[#1d1d1d]"
-                                        }`}
-                                        style={{
-                                          top:
-                                            assetIndex * 46,
-                                          height: 46,
-                                        }}
-                                        role="option"
-                                        aria-selected={
-                                          symbol === asset.symbol
-                                        }
-                                      >
-                                        {isLoaded ? (
-                                          <div className="flex h-full items-center gap-3 px-4 text-left">
-                                            <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#222222]">
-                                              <img
-                                                src={`https://img.logo.dev/ticker/${asset.symbol}?token=${process.env.NEXT_PUBLIC_LOGO_DEV_TOKEN}`}
-                                                alt=""
-                                                className="h-full w-full object-contain"
-                                                onError={(event) => {
-                                                  event.currentTarget.style.display = "none";
-                                                }}
-                                              />
-                                            </div>
 
-                                            <div className="min-w-0">
-                                              <p className="truncate text-[15px] font-medium text-[#d5d5d5]">
-                                                {asset.symbol}
-                                              </p>
+                                        return (
+                                          <button
+                                            key={`${asset.symbol}-${realIndex}`}
+                                            type="button"
+                                            onClick={() => {
+                                              setSymbol(asset.symbol);
+                                              setMarketMenuOpen(false);
+                                              setMarketSearch("");
+                                              setMarketScrollTop(0);
+                                              setLoadedMarketIndices(
+                                                new Set(),
+                                              );
+                                            }}
+                                            className={`flex h-[46px] w-full items-center gap-3 px-4 text-left ${
+                                              symbol === asset.symbol
+                                                ? "bg-[#1f1f1f]"
+                                                : "hover:bg-[#1d1d1d]"
+                                            }`}
+                                          >
+                                            {!isLoaded ? (
+                                              <div className="flex w-full items-center gap-3">
+                                                <div className="h-7 w-7 shrink-0 animate-pulse rounded-full bg-[#252525]" />
 
-                                              <p className="truncate text-[11px] text-[#777777]">
-                                                {asset.name}
-                                              </p>
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div className="flex h-full items-center gap-3 px-4">
-                                            <div className="h-7 w-7 animate-pulse rounded-full bg-[#252525]" />
+                                                <div className="flex-1 space-y-2">
+                                                  <div className="h-3 w-16 animate-pulse rounded bg-[#252525]" />
 
-                                            <div className="flex-1">
-                                              <div className="h-3 w-20 animate-pulse rounded bg-[#252525]" />
-                                              <div className="mt-1.5 h-2 w-28 animate-pulse rounded bg-[#202020]" />
-                                            </div>
-                                          </div>
-                                        )}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
+                                                  <div className="h-2 w-28 animate-pulse rounded bg-[#202020]" />
+                                                </div>
+                                              </div>
+                                            ) : (
+                                              <>
+                                                <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#222222]">
+                                                  <img
+                                                    src={`https://img.logo.dev/ticker/${asset.symbol}?token=${process.env.NEXT_PUBLIC_LOGO_DEV_TOKEN}`}
+                                                    alt=""
+                                                    className="h-full w-full object-contain"
+                                                    onError={(event) => {
+                                                      event.currentTarget.style.display =
+                                                        "none";
+                                                    }}
+                                                  />
+                                                </div>
+
+                                                <div className="min-w-0">
+                                                  <p className="truncate text-[14px] font-medium text-[#d5d5d5]">
+                                                    {asset.symbol}
+                                                  </p>
+
+                                                  <p className="truncate text-[11px] text-[#777777]">
+                                                    {asset.name}
+                                                  </p>
+                                                </div>
+                                              </>
+                                            )}
+                                          </button>
+                                        );
+                                      },
+                                    )}
+
+                                    <div
+                                      style={{
+                                        height: bottomSpacerHeight,
+                                      }}
+                                    />
+                                  </>
+
+                                )}
+
                               </div>
+
                             </div>
                           )}
+
                         </div>
 
                       </div>
 
 
                       {/* Side */}
-                      <div className="w-[251px]">
+                      <div>
 
-                        <label className="mb-3 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
+                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
                           SIDE
                         </label>
 
-                        <div className="flex h-[60px] overflow-hidden rounded-md border border-[#353535] bg-[#171717]">
+                        <div className="flex h-[48px] overflow-hidden rounded-md border border-[#353535] bg-[#171717]">
 
                           <button
                             type="button"
                             onClick={() => setSide("buy")}
-                            className={`flex-1 text-[16px] font-medium transition ${
+                            className={`flex-1 text-[14px] font-medium transition ${
                               side === "buy"
                                 ? "bg-[#1d1d1d] text-[#22c77a]"
-                                : "text-[#a5a5a5] hover:bg-[#1b1b1b]"
+                                : "text-[#a5a5a5]"
                             }`}
                           >
                             BUY
@@ -989,10 +1200,10 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => setSide("sell")}
-                            className={`flex-1 border-l border-[#353535] text-[16px] font-medium transition ${
+                            className={`flex-1 border-l border-[#353535] text-[14px] font-medium transition ${
                               side === "sell"
                                 ? "bg-[#1d1d1d] text-[#ef5350]"
-                                : "text-[#a5a5a5] hover:bg-[#1b1b1b]"
+                                : "text-[#a5a5a5]"
                             }`}
                           >
                             SELL
@@ -1004,121 +1215,205 @@ export default function Home() {
 
 
                       {/* Quantity */}
-                      <div className="w-[231px]">
+                      <div>
 
-                        <label className="mb-3 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
+                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
                           QUANTITY
                         </label>
 
-                        <div className="relative">
+                        <input
+                          type="number"
+                          min="1"
+                          value={quantity}
+                          onChange={(event) =>
+                            setQuantity(event.target.value)
+                          }
+                          className="h-[48px] w-full rounded-md border border-[#353535] bg-[#171717] px-4 text-[15px] font-medium text-white outline-none transition focus:border-[#5a5a5a]"
+                        />
+
+                      </div>
+
+                      {/* Entry Price */}
+                      <div>
+
+                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
+                          ENTRY PRICE
+                        </label>
+
+                        <div className="flex h-[48px] overflow-hidden rounded-md border border-[#353535] bg-[#171717]">
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOrderType("market")
+                            }
+                            className={`px-4 text-[13px] font-medium ${
+                              orderType === "market"
+                                ? "bg-[#1d1d1d] text-[#f0d04f]"
+                                : "text-[#8d939b]"
+                            }`}
+                          >
+                            Market
+                          </button>
+
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOrderType("limit")
+                            }
+                            className={`border-l border-[#353535] px-4 text-[13px] font-medium ${
+                              orderType === "limit"
+                                ? "bg-[#1d1d1d] text-[#f0d04f]"
+                                : "text-[#8d939b]"
+                            }`}
+                          >
+                            Limit
+                          </button>
+
 
                           <input
                             type="number"
-                            value={quantity}
-                            onChange={(event) =>
-                              setQuantity(event.target.value)
+                            step="0.01"
+                            disabled={orderType === "market"}
+                            value={
+                              orderType === "market"
+                                ? currentMarketPrice.toFixed(2)
+                                : entryPrice
                             }
-                            className="h-[60px] w-full rounded-md border border-[#353535] bg-[#171717] px-4 pr-14 text-[16px] font-medium text-white outline-none transition focus:border-[#5a5a5a]"
+                            onChange={(event) =>
+                              setEntryPrice(event.target.value)
+                            }
+                            placeholder="0.00"
+                            className="min-w-0 flex-1 border-l border-[#353535] bg-[#171717] px-3 text-[13px] text-white outline-none disabled:text-[#a7abb2]"
                           />
 
-                          <div className="absolute right-0 top-0 flex h-full w-12 flex-col border-l border-[#353535]">
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setQuantity(
-                                  String(Number(quantity || 0) + 1),
-                                )
-                              }
-                              className="flex flex-1 items-center justify-center text-[#b0b0b0] hover:bg-[#1d1d1d]"
-                            >
-                              <svg
-                                className="h-4 w-4"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="m6 14 6-6 6 6" />
-                              </svg>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setQuantity(
-                                  String(
-                                    Math.max(
-                                      0,
-                                      Number(quantity || 0) - 1,
-                                    ),
-                                  ),
-                                )
-                              }
-                              className="flex flex-1 items-center justify-center border-t border-[#353535] text-[#b0b0b0] hover:bg-[#1d1d1d]"
-                            >
-                              <svg
-                                className="h-4 w-4"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="m6 10 6 6 6-6" />
-                              </svg>
-                            </button>
-
-                          </div>
-
                         </div>
+
+
+                        <p className="mt-2 text-[11px] text-[#777d87]">
+                          Current Market Price
+                        </p>
 
                       </div>
 
 
-                      {/* Submit */}
-                      <button
-                        onClick={analyzeTrade}
-                        disabled={analysisLoading}
-                        className="flex h-[60px] flex-1 items-center justify-between rounded-md bg-[#ffd33d] px-6 text-[14px] font-semibold uppercase tracking-[0.08em] text-[#171717] transition hover:bg-[#ffda5c] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
+                      {/* Stop Loss */}
+                      <div>
 
-                        <span>
-                          {analysisLoading
-                            ? "ANALYZING..."
-                            : "ANALYZE TRADE"}
-                        </span>
+                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
+                          STOP LOSS
+                        </label>
 
-                        <span className="text-[24px] font-normal">
-                          →
-                        </span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={stopLoss}
+                          onChange={(event) =>
+                            setStopLoss(event.target.value)
+                          }
+                          placeholder="Optional"
+                          className="h-[48px] w-full rounded-md border border-[#353535] bg-[#171717] px-4 text-[14px] text-white outline-none placeholder:text-[#666666] focus:border-[#ef5350]"
+                        />
+                        <p
+                          className={`mt-2 text-[11px] ${
+                            stopLossPercent === null
+                              ? "text-[#777d87]"
+                              : stopLossPercent < 0
+                                ? "text-[#ef7770]"
+                                : "text-[#ef7770]"
+                          }`}
+                        >
+                          {stopLossPercent === null
+                            ? "Optional"
+                            : `${stopLossPercent.toFixed(2)}% ($${Math.abs(
+                                effectiveEntryPrice -
+                                Number(stopLoss),
+                              ).toFixed(2)})`}
+                        </p>
+                      </div>
 
-                      </button>
 
-                    </div>
+                      {/* Take Profit */}
+                      <div>
+
+                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
+                          TAKE PROFIT
+                        </label>
+
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={takeProfit}
+                          onChange={(event) =>
+                            setTakeProfit(event.target.value)
+                          }
+                          placeholder="Optional"
+                          className="h-[48px] w-full rounded-md border border-[#353535] bg-[#171717] px-4 text-[14px] text-white outline-none placeholder:text-[#666666] focus:border-[#22c77a]"
+                        />
+                        <p
+                          className={`mt-2 text-[11px] ${
+                            takeProfitPercent === null
+                              ? "text-[#777d87]"
+                              : "text-[#38c980]"
+                          }`}
+                        >
+                          {takeProfitPercent === null
+                            ? "Optional"
+                            : `${takeProfitPercent >= 0 ? "+" : ""}${takeProfitPercent.toFixed(2)}% ($${Math.abs(
+                                Number(takeProfit) -
+                                effectiveEntryPrice,
+                              ).toFixed(2)})`}
+                        </p>
+                      </div>
 
 
-                    {/* Disclaimer */}
-                    <div className="mt-4 flex items-center gap-3 text-[13px] text-[#999999]">
+                      {/* Analyze */}
+                      {/* Bottom Row: Disclaimer + Analyze */}
+                      <div className="col-span-3 flex items-center justify-between pt-1">
 
-                      <span className="text-[18px] text-[#aaaaaa]">
-                        ♢
-                      </span>
+                        {/* Disclaimer */}
+                        <div className="flex items-center gap-3 text-[12px] text-[#999999]">
 
-                      <span>
-                        Paper trading via Alpaca
-                      </span>
+                          <span className="text-[18px] text-[#aaaaaa]">
+                            ♢
+                          </span>
 
-                      <span className="text-[#555555]">
-                        •
-                      </span>
+                          <span>
+                            Paper trading via Alpaca
+                          </span>
 
-                      <span>
-                        All trades subject to TradeGuardian risk controls
-                      </span>
+                          <span className="text-[#555555]">
+                            •
+                          </span>
+
+                          <span>
+                            All trades subject to TradeGuardian risk controls
+                          </span>
+
+                        </div>
+
+
+                        {/* Analyze Button */}
+                        <button
+                          onClick={analyzeTrade}
+                          disabled={analysisLoading}
+                          className="flex h-[48px] w-[205px] shrink-0 items-center justify-between rounded-md bg-[#ffd33d] px-6 text-[13px] font-semibold uppercase tracking-[0.08em] text-[#171717] transition hover:bg-[#ffda5c] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+
+                          <span>
+                            {analysisLoading
+                              ? "ANALYZING..."
+                              : "ANALYZE TRADE"}
+                          </span>
+
+                          <span className="text-[22px] font-normal">
+                            →
+                          </span>
+
+                        </button>
+
+                      </div>
 
                     </div>
 
@@ -1127,220 +1422,378 @@ export default function Home() {
                 </section>
 
                 {/* RIGHT: RISK CHECKS */}
-                <div className="col-start-2 row-span-2 row-start-1 flex min-h-0 flex-col overflow-hidden rounded-md border border-[#272b31] bg-[#101010]">
+                {/* RIGHT: RISK ANALYSIS + GUARDIAN DECISION */}
+                <div className="col-start-2 row-span-2 row-start-1 flex min-h-0 flex-col gap-3">
 
-                  {/* Risk Checks Header */}
-                  <div className="px-7 pt-7">
-                    <p className="text-[13px] tracking-[0.12em] text-[#a0a4ab]">
-                      RISK CHECKS
-                    </p>
-                  </div>
+                  {/* RISK ANALYSIS */}
+                  <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-[#272b31] bg-[#101010]">
 
+                    {/* Header */}
+                    <div className="flex shrink-0 items-start justify-between border-b border-[#272b31] px-5 py-5">
 
-                  {/* Risk Checks */}
-                  <div className="mt-6 flex-1 px-7">
+                      <div className="flex items-center gap-3">
 
-                    {/* Check 01 */}
-                    <div className="border-b border-[#272b31] pb-6">
+                        <p className="text-[13px] tracking-[0.12em] text-[#a0a4ab]">
+                          RISK ANALYSIS
+                        </p>
 
-                      <div className="flex items-center justify-between">
-
-                        <div className="flex items-center gap-5">
-
-                          <span className="text-[18px] font-medium text-[#f0d04f]">
-                            01
-                          </span>
-
-                          <div className="flex items-center gap-3">
-
-                            <span className="text-[16px] text-[#e1e3e7]">
-                              Exposure
-                            </span>
-
-                            <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#777b83] text-[10px] text-[#a7abb2]">
-                              i
-                            </span>
-
-                          </div>
-
-                        </div>
-
-                        <div className="flex h-9 min-w-9 items-center justify-center rounded-full bg-[#1b1e22] px-3 text-[#a7abb2]">
-                          —
-                        </div>
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#555b65] text-[9px] text-[#8b939e]">
+                          i
+                        </span>
 
                       </div>
 
-                      <span className="mt-4 block text-[#4b5058]">
-                        +
-                      </span>
+                      <div className="text-right">
 
-                    </div>
+                        <div className="flex items-baseline justify-end gap-1">
 
-
-                    {/* Check 02 */}
-                    <div className="border-b border-[#272b31] py-6">
-
-                      <div className="flex items-center justify-between">
-
-                        <div className="flex items-center gap-5">
-
-                          <span className="text-[18px] font-medium text-[#f0d04f]">
-                            02
+                          <span className="text-[11px] text-[#a0a4ab]">
+                            Risk Level
                           </span>
 
-                          <div className="flex items-center gap-3">
-
-                            <span className="text-[16px] text-[#e1e3e7]">
-                              Concentration
-                            </span>
-
-                            <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#777b83] text-[10px] text-[#a7abb2]">
-                              i
-                            </span>
-
-                          </div>
-
-                        </div>
-
-                        <div className="flex h-9 min-w-9 items-center justify-center rounded-full bg-[#1b1e22] px-3 text-[#a7abb2]">
-                          —
-                        </div>
-
-                      </div>
-
-                      <span className="mt-4 block text-[#4b5058]">
-                        +
-                      </span>
-
-                    </div>
-
-
-                    {/* Check 03 */}
-                    <div className="border-b border-[#272b31] py-6">
-
-                      <div className="flex items-center justify-between">
-
-                        <div className="flex items-center gap-5">
-
-                          <span className="text-[18px] font-medium text-[#f0d04f]">
-                            03
+                          <span className="font-mono text-[24px] font-semibold text-[#f0d04f]">
+                            {guardianRisk
+                              ? guardianRisk.score
+                              : "—"}
                           </span>
 
-                          <div className="flex items-center gap-3">
-
-                            <span className="text-[16px] text-[#e1e3e7]">
-                              Buying Power
-                            </span>
-
-                            <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#777b83] text-[10px] text-[#a7abb2]">
-                              i
-                            </span>
-
-                          </div>
-
-                        </div>
-
-                        <div className="flex h-9 min-w-9 items-center justify-center rounded-full bg-[#1b1e22] px-3 text-[#a7abb2]">
-                          —
-                        </div>
-
-                      </div>
-
-                      <span className="mt-4 block text-[#4b5058]">
-                        +
-                      </span>
-
-                    </div>
-
-
-                    {/* Check 04 */}
-                    <div className="py-6">
-
-                      <div className="flex items-center justify-between">
-
-                        <div className="flex items-center gap-5">
-
-                          <span className="text-[18px] font-medium text-[#f0d04f]">
-                            04
+                          <span className="text-[12px] text-[#8d939c]">
+                            /100
                           </span>
 
-                          <div className="flex items-center gap-3">
-
-                            <span className="text-[16px] text-[#e1e3e7]">
-                              Position
-                            </span>
-
-                            <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#777b83] text-[10px] text-[#a7abb2]">
-                              i
-                            </span>
-
-                          </div>
-
                         </div>
 
-                        <div className="flex h-9 min-w-9 items-center justify-center rounded-full bg-[#1b1e22] px-3 text-[#a7abb2]">
-                          —
-                        </div>
+                        <p className="mt-1 text-[10px] font-medium tracking-[0.12em] text-[#f0d04f]">
+                          {guardianRisk
+                            ? guardianRisk.level
+                            : "STANDBY"}
+                        </p>
 
                       </div>
 
                     </div>
 
-                  </div>
 
+                    {/* Checks */}
+                    <div className="risk-analysis-scroll min-h-0 flex-1 overflow-y-auto px-4">
+
+                      <DetailedRiskCheck
+                        number="01"
+                        title="Trade Risk"
+                        subtitle={
+                          analysisResult
+                            ? `$${analysisResult.proposal.trade_value.toLocaleString(
+                                undefined,
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )} (${analysisResult.risk_metrics.trade_percent_of_equity.toFixed(2)}% of equity)`
+                            : "Waiting for analysis"
+                        }
+                        status={
+                          analysisResult
+                            ? analysisResult.risk_checks.exposure.status === "PASS"
+                              ? "pass"
+                              : "fail"
+                            : "idle"
+                        }
+                      />
+
+
+                      <DetailedRiskCheck
+                        number="02"
+                        title="Position Size"
+                        subtitle={
+                          analysisResult
+                            ? `Recommended: ${analysisResult.risk_metrics.projected_quantity} shares`
+                            : "Waiting for analysis"
+                        }
+                        status={
+                          analysisResult
+                            ? analysisResult.risk_checks.position.status === "PASS"
+                              ? "pass"
+                              : "fail"
+                            : "idle"
+                        }
+                      />
+
+
+                      <DetailedRiskCheck
+                        number="03"
+                        title="Risk / Reward"
+                        subtitle={
+                          riskRewardRatio !== null
+                            ? `Potential R:R  1 : ${riskRewardRatio.toFixed(2)}`
+                            : "Set stop loss and take profit"
+                        }
+                        status={
+                          riskRewardRatio === null
+                            ? "idle"
+                            : riskRewardRatio >= 1.5
+                              ? "pass"
+                              : "warning"
+                        }
+                      />
+
+
+                      <DetailedRiskCheck
+                        number="04"
+                        title="Concentration"
+                        subtitle={
+                          analysisResult
+                            ? `Projected ${symbol} allocation: ${analysisResult.risk_metrics.projected_concentration_percent.toFixed(2)}%`
+                            : "Waiting for analysis"
+                        }
+                        status={
+                          analysisResult
+                            ? analysisResult.risk_checks.concentration.status === "PASS"
+                              ? "pass"
+                              : "fail"
+                            : "idle"
+                        }
+                      />
+
+
+                      <DetailedRiskCheck
+                        number="05"
+                        title="Buying Power"
+                        subtitle={
+                          analysisResult
+                            ? `Trade cost: $${analysisResult.proposal.trade_value.toLocaleString(
+                                undefined,
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )}`
+                            : "Waiting for analysis"
+                        }
+                        secondaryText={
+                          analysisResult
+                            ? `Available: $${analysisResult.risk_metrics.buying_power.toLocaleString(
+                                undefined,
+                                {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                },
+                              )}`
+                            : undefined
+                        }
+                        status={
+                          analysisResult
+                            ? analysisResult.risk_checks.buying_power.status === "PASS"
+                              ? "pass"
+                              : "fail"
+                            : "idle"
+                        }
+                      />
+
+
+                      <DetailedRiskCheck
+                        number="06"
+                        title="Stop Loss Validity"
+                        subtitle={
+                          parsedStopLoss === null
+                            ? "No stop loss set"
+                            : stopLossValid
+                              ? "Stop loss placement is valid"
+                              : "Stop loss is on the wrong side of entry"
+                        }
+                        status={
+                          parsedStopLoss === null
+                            ? "warning"
+                            : stopLossValid
+                              ? "pass"
+                              : "fail"
+                        }
+                      />
+
+
+                      <DetailedRiskCheck
+                        number="07"
+                        title="Volatility (ATR)"
+                        subtitle="Volatility analysis not yet available"
+                        status="idle"
+                      />
+
+
+                      <DetailedRiskCheck
+                        number="08"
+                        title="Correlation Risk"
+                        subtitle="Portfolio correlation analysis not yet available"
+                        status="idle"
+                      />
+
+
+                      <DetailedRiskCheck
+                        number="09"
+                        title="Drawdown Impact"
+                        subtitle="Projected drawdown analysis not yet available"
+                        status="idle"
+                        last
+                      />
+
+                    </div>
+
+                  </section>
 
                   {/* GUARDIAN DECISION */}
-                  <div className="shrink-0 border-t border-[#272b31] px-7 py-5">
+                  <section className="shrink-0 rounded-md border border-[#272b31] bg-[#101010] p-5">
 
-                    <p className="text-[10px] tracking-[0.16em] text-[#7d8797]">
-                      GUARDIAN DECISION
-                    </p>
+                    {/* Header */}
+                    <div className="flex items-center gap-2">
+
+                      <p className="text-[11px] tracking-[0.14em] text-[#9ca3ad]">
+                        GUARDIAN DECISION
+                      </p>
+
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#555b65] text-[9px] text-[#8b939e]">
+                        i
+                      </span>
+
+                    </div>
 
 
                     {analysisResult ? (
 
                       <>
+                        {/* Decision */}
+                        <div className="mt-4 flex items-center gap-3">
 
-                        <p
-                          className={`mt-3 text-[28px] font-semibold tracking-tight ${
-                            analysisResult.decision.status === "APPROVED"
-                              ? "text-emerald-400"
-                              : "text-red-400"
-                          }`}
-                        >
-                          {analysisResult.decision.status}
-                        </p>
+                          <span
+                            className={`flex h-7 w-7 items-center justify-center rounded-md ${
+                              analysisResult.decision.status === "APPROVED"
+                                ? "bg-[#143225] text-[#38c980]"
+                                : analysisResult.decision.status === "FLAGGED"
+                                  ? "bg-[#3a3114] text-[#f0d04f]"
+                                  : "bg-[#3a1c1c] text-[#ef5350]"
+                            }`}
+                          >
+                            {analysisResult.decision.status === "APPROVED"
+                              ? "✓"
+                              : analysisResult.decision.status === "FLAGGED"
+                                ? "!"
+                                : "×"}
+                          </span>
 
-                        <p className="mt-2 text-sm leading-5 text-[#7d8797]">
+
+                          <p
+                            className={`text-[25px] font-semibold tracking-tight ${
+                              analysisResult.decision.status === "APPROVED"
+                                ? "text-[#38c980]"
+                                : analysisResult.decision.status === "FLAGGED"
+                                  ? "text-[#f0d04f]"
+                                  : "text-[#ef5350]"
+                            }`}
+                          >
+                            {analysisResult.decision.status === "APPROVED"
+                              ? "APPROVED"
+                              : analysisResult.decision.status === "FLAGGED"
+                                ? "CAUTION"
+                                : "BLOCKED"}
+                          </p>
+
+                        </div>
+
+
+                        {/* Description */}
+                        <p className="mt-2 text-[13px] leading-5 text-[#a0a4ab]">
                           {analysisResult.decision.reasons[0]}
                         </p>
+
+
+                        {/* Metrics */}
+                        <div className="mt-4 grid grid-cols-3 divide-x divide-[#272b31] border-t border-[#272b31] pt-4">
+
+                          <DecisionMetric
+                            label="MAX LOSS"
+                            value={
+                              riskAmount !== null
+                                ? `$${(
+                                    riskAmount *
+                                    Number(quantity || 0)
+                                  ).toFixed(2)}`
+                                : "—"
+                            }
+                            subvalue={
+                              riskAmount !== null &&
+                              effectiveEntryPrice > 0
+                                ? `${(
+                                    (riskAmount /
+                                      effectiveEntryPrice) *
+                                    100
+                                  ).toFixed(2)}% of entry`
+                                : "Set stop loss"
+                            }
+                          />
+
+
+                          <DecisionMetric
+                            label="RISK / REWARD"
+                            value={
+                              riskRewardRatio !== null
+                                ? `1 : ${riskRewardRatio.toFixed(2)}`
+                                : "—"
+                            }
+                            subvalue="Potential ratio"
+                          />
+
+
+                          <DecisionMetric
+                            label="RISK LEVEL"
+                            value={
+                              analysisResult.decision.status === "APPROVED"
+                                ? "LOW"
+                                : analysisResult.decision.status === "FLAGGED"
+                                  ? "MODERATE"
+                                  : "HIGH"
+                            }
+                            subvalue={
+                              analysisResult.decision.status === "APPROVED"
+                                ? "Low Risk"
+                                : analysisResult.decision.status === "FLAGGED"
+                                  ? "Moderate Risk"
+                                  : "High Risk"
+                            }
+                          />
+
+                        </div>
+
+
+                        {/* Review Button */}
+                        <button
+                          type="button"
+                          className="mt-4 flex h-[38px] w-full items-center justify-center gap-4 rounded-md border border-[#b89620] text-[11px] font-semibold tracking-[0.1em] text-[#e6c44a] transition hover:bg-[#1b1b1b]"
+                        >
+                          <span>
+                            REVIEW DETAILS
+                          </span>
+
+                          <span className="text-base">
+                            →
+                          </span>
+                        </button>
 
                       </>
 
                     ) : (
 
-                      <div className="mt-3 flex items-center gap-3">
+                      <div className="mt-5">
 
-                        <span className="text-[28px] font-semibold tracking-tight text-[#a7abb2]">
+                        <p className="text-[25px] font-semibold text-[#a7abb2]">
                           STANDBY
-                        </span>
+                        </p>
 
-                        <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-[#1b1e22] px-2 text-[#a7abb2]">
-                          —
-                        </span>
+                        <p className="mt-2 text-[13px] text-[#7d8797]">
+                          Run analysis to evaluate this trade.
+                        </p>
 
                       </div>
 
                     )}
 
-                    {!analysisResult && (
-                      <p className="mt-4 text-sm text-[#7d8797]">
-                        Run analysis to see results.
-                      </p>
-                    )}
-
-                  </div>
+                  </section>
 
                 </div>
 
@@ -1439,6 +1892,241 @@ function MarketStat({
 
       <p className="mt-2 font-mono text-sm text-[#dce1e9]">
         {value}
+      </p>
+
+    </div>
+  );
+}
+function RiskCheck({
+  number,
+  title,
+  value,
+  status,
+  description,
+  last = false,
+}: {
+  number: string;
+  title: string;
+  value: string;
+  status: "pass" | "fail" | "idle";
+  description: string;
+  last?: boolean;
+}) {
+  const statusStyles = {
+    pass: {
+      badge:
+        "bg-[#143225] text-[#38c980]",
+      icon: "✓",
+    },
+
+    fail: {
+      badge:
+        "bg-[#3a1c1c] text-[#ef5350]",
+      icon: "!",
+    },
+
+    idle: {
+      badge:
+        "bg-[#1b1e22] text-[#a7abb2]",
+      icon: "—",
+    },
+  };
+
+  const currentStatus =
+    statusStyles[status];
+
+  return (
+    <div
+      className={`py-6 ${
+        last
+          ? ""
+          : "border-b border-[#272b31]"
+      }`}
+    >
+
+      <div className="flex items-center justify-between">
+
+        <div className="flex items-center gap-5">
+
+          <span className="text-[18px] font-medium text-[#f0d04f]">
+            {number}
+          </span>
+
+          <div>
+
+            <div className="flex items-center gap-3">
+
+              <span className="text-[16px] text-[#e1e3e7]">
+                {title}
+              </span>
+
+              <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#777b83] text-[10px] text-[#a7abb2]">
+                i
+              </span>
+
+            </div>
+
+            <p className="mt-2 text-[12px] text-[#707780]">
+              {description}
+            </p>
+
+          </div>
+
+        </div>
+
+
+        <div className="flex flex-col items-end gap-2">
+
+          <span
+            className={`flex min-h-9 min-w-9 items-center justify-center rounded-full px-3 text-[14px] font-medium ${
+              currentStatus.badge
+            }`}
+          >
+            {currentStatus.icon}
+          </span>
+
+          <span className="font-mono text-[12px] text-[#b7bbc2]">
+            {value}
+          </span>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+function DetailedRiskCheck({
+  number,
+  title,
+  subtitle,
+  secondaryText,
+  status,
+  last = false,
+}: {
+  number: string;
+  title: string;
+  subtitle: string;
+  secondaryText?: string;
+  status: "pass" | "fail" | "warning" | "idle";
+  last?: boolean;
+}) {
+  const styles = {
+    pass: {
+      badge:
+        "bg-[#143225] text-[#38c980]",
+      text: "PASS",
+    },
+
+    fail: {
+      badge:
+        "bg-[#3a1c1c] text-[#ef5350]",
+      text: "FAIL",
+    },
+
+    warning: {
+      badge:
+        "bg-[#3a3114] text-[#f0d04f]",
+      text: "WARNING",
+    },
+
+    idle: {
+      badge:
+        "bg-[#1b1e22] text-[#7d8797]",
+      text: "—",
+    },
+  };
+
+  const current =
+    styles[status];
+
+  return (
+    <div
+      className={`flex items-start gap-3 px-2 py-3 ${
+        last
+          ? ""
+          : "border-b border-[#272b31]"
+      }`}
+    >
+
+      <span className="mt-0.5 font-mono text-[13px] font-medium text-[#e6c44a]">
+        {number}
+      </span>
+
+
+      <div className="min-w-0 flex-1">
+
+        <div className="flex items-center gap-2">
+
+          <p className="text-[14px] font-medium text-[#dfe2e7]">
+            {title}
+          </p>
+
+          <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#4b515a] text-[9px] text-[#7d8797]">
+            i
+          </span>
+
+        </div>
+
+
+        <p className="mt-1 truncate text-[11px] text-[#9299a3]">
+          {subtitle}
+        </p>
+
+
+        {secondaryText && (
+          <p className="mt-1 text-[11px] text-[#9299a3]">
+            {secondaryText}
+          </p>
+        )}
+
+      </div>
+
+
+      <div className="flex items-center gap-3">
+
+        <span
+          className={`rounded-sm px-3 py-1.5 text-[10px] font-semibold tracking-wide ${
+            current.badge
+          }`}
+        >
+          {current.text}
+        </span>
+
+
+        <span className="text-[#747b85]">
+          ⌄
+        </span>
+
+      </div>
+
+    </div>
+  );
+}
+
+
+function DecisionMetric({
+  label,
+  value,
+  subvalue,
+}: {
+  label: string;
+  value: string;
+  subvalue: string;
+}) {
+  return (
+    <div className="px-3 first:pl-0 last:pr-0">
+
+      <p className="text-[9px] tracking-[0.12em] text-[#747b85]">
+        {label}
+      </p>
+
+      <p className="mt-2 text-[15px] font-semibold text-[#e1e3e7]">
+        {value}
+      </p>
+
+      <p className="mt-1 text-[10px] text-[#8b939e]">
+        {subvalue}
       </p>
 
     </div>

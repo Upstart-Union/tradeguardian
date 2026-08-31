@@ -19,6 +19,21 @@ class GuardianDecision(BaseModel):
         description="Reasons behind the Guardian decision",
     )
 
+class RiskCheckStatus(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+
+
+class RiskCheckResult(BaseModel):
+    status: RiskCheckStatus
+    reason: str
+
+
+class RiskChecks(BaseModel):
+    exposure: RiskCheckResult
+    concentration: RiskCheckResult
+    buying_power: RiskCheckResult
+    position: RiskCheckResult
 
 class RiskMetrics(BaseModel):
     existing_quantity: float
@@ -44,4 +59,5 @@ class AnalysisResult(BaseModel):
 
     proposal: dict
     risk_metrics: RiskMetrics
+    risk_checks: RiskChecks
     decision: GuardianDecision

@@ -12,6 +12,9 @@ from models.decision import (
     DecisionStatus,
     GuardianDecision,
     RiskMetrics,
+    RiskCheckStatus,
+    RiskCheckResult,
+    RiskChecks,
 )
 from services.history_service import save_analysis
 
@@ -95,6 +98,134 @@ def analyze_trade(proposal: TradeProposal):
         2,
     )
 
+    # -------------------------------------------------
+    # Individual risk checks
+    # -------------------------------------------------
+
+    MAX_TRADE_EXPOSURE_PERCENT = 10.0
+    MAX_CONCENTRATION_PERCENT = 25.0
+
+    # Exposure check
+    exposure_pass = (
+        trade_percent_of_equity
+        <= MAX_TRADE_EXPOSURE_PERCENT
+    )
+
+    exposure_check = RiskCheckResult(
+        status=(
+            RiskCheckStatus.PASS
+            if exposure_pass
+            else RiskCheckStatus.FAIL
+        ),
+        reason=(
+            f"Trade exposure is "
+            f"{trade_percent_of_equity:.2f}% of account equity."
+            if exposure_pass
+            else (
+                f"Trade exposure of "
+                f"{trade_percent_of_equity:.2f}% exceeds the "
+                f"{MAX_TRADE_EXPOSURE_PERCENT:.2f}% limit."
+            )
+        ),
+    )
+
+
+    # Concentration check
+    concentration_pass = (
+        projected_concentration_percent
+        <= MAX_CONCENTRATION_PERCENT
+    )
+
+    concentration_check = RiskCheckResult(
+        status=(
+            RiskCheckStatus.PASS
+            if concentration_pass
+            else RiskCheckStatus.FAIL
+        ),
+        reason=(
+            f"Projected position concentration is "
+            f"{projected_concentration_percent:.2f}%."
+            if concentration_pass
+            else (
+                f"Projected concentration of "
+                f"{projected_concentration_percent:.2f}% "
+                f"exceeds the "
+                f"{MAX_CONCENTRATION_PERCENT:.2f}% limit."
+            )
+        ),
+    )
+
+
+    # Buying power check
+    buying_power_pass = (
+        proposal.side.value == "sell"
+        or trade_value <= buying_power
+    )
+
+    buying_power_check = RiskCheckResult(
+        status=(
+            RiskCheckStatus.PASS
+            if buying_power_pass
+            else RiskCheckStatus.FAIL
+        ),
+        reason=(
+            "Sell orders do not require additional buying power."
+            if proposal.side.value == "sell"
+            else (
+                f"Trade requires ${trade_value:,.2f}, "
+                f"within available buying power of "
+                f"${buying_power:,.2f}."
+                if buying_power_pass
+                else (
+                    f"Trade requires ${trade_value:,.2f}, "
+                    f"but only ${buying_power:,.2f} "
+                    f"is available."
+                )
+            )
+        ),
+    )
+
+
+    # Position / sell validation check
+    if proposal.side.value == "sell":
+
+        position_pass = (
+            sell_validation is not None
+            and sell_validation["valid"]
+        )
+
+        position_reason = (
+            sell_validation["reason"]
+            if sell_validation
+            else "Position validation completed."
+        )
+
+    else:
+
+        position_pass = True
+
+        position_reason = (
+            f"Projected position will be "
+            f"{projected_quantity} shares."
+        )
+
+    position_check = RiskCheckResult(
+        status=(
+            RiskCheckStatus.PASS
+            if position_pass
+            else RiskCheckStatus.FAIL
+        ),
+        reason=position_reason,
+    )
+
+
+    risk_checks = RiskChecks(
+        exposure=exposure_check,
+        concentration=concentration_check,
+        buying_power=buying_power_check,
+        position=position_check,
+    )
+
     # Evaluate the trade
     if proposal.side.value == "buy":
         risk_decision = evaluate_risk(
@@ -162,7 +293,7 @@ def analyze_trade(proposal: TradeProposal):
                 projected_concentration_percent
             ),
         ),
-
+        risk_checks=risk_checks,
         decision=risk_decision,
     )
 

@@ -23,3 +23,18 @@ class TradeProposal(BaseModel):
         gt=0,
         description="Number of shares to trade",
     )
+
+    entry_price: float | None = Field(
+        default=None,
+        gt=0,
+    )
+
+    stop_loss: float | None = Field(
+        default=None,
+        gt=0,
+    )
+
+    take_profit: float | None = Field(
+        default=None,
+        gt=0,
+    )

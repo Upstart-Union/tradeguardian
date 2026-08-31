@@ -335,30 +335,47 @@ export default function MarketChart({
       candleSeries;
 
 
-    const handleResize = () => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({
-          width:
-            chartContainerRef.current.clientWidth,
-
-          height:
-            chartContainerRef.current.clientHeight,
-        });
+    const resizeChart = () => {
+      if (!chartContainerRef.current) {
+        return;
       }
+
+      const width =
+        chartContainerRef.current.clientWidth;
+
+      const height =
+        chartContainerRef.current.clientHeight;
+
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+
+      chart.applyOptions({
+        width,
+        height,
+      });
     };
 
 
-    window.addEventListener(
-      "resize",
-      handleResize,
+    const resizeObserver =
+      new ResizeObserver(() => {
+        resizeChart();
+      });
+
+
+    resizeObserver.observe(
+      chartContainerRef.current,
     );
 
 
+    // Run once after layout has settled
+    requestAnimationFrame(() => {
+      resizeChart();
+    });
+
+
     return () => {
-      window.removeEventListener(
-        "resize",
-        handleResize,
-      );
+      resizeObserver.disconnect();
 
       chart.remove();
 
@@ -611,10 +628,10 @@ export default function MarketChart({
 
   }, [symbol, timeframe]);
 
-  return (
+    return (
     <div
       ref={chartContainerRef}
-      className="w-full"
+      className="h-full w-full"
     />
   );
 }
