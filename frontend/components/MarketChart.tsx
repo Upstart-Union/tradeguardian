@@ -9,6 +9,7 @@ import {
 } from "lightweight-charts";
 
 import type {
+  Time,
   UTCTimestamp,
 } from "lightweight-charts";
 
@@ -29,7 +30,77 @@ type MarketChartProps = {
   symbol: string;
 };
 
+function getIntervalSeconds(
+  timeframe: string,
+): number {
+  if (timeframe === "1D") {
+    return 5 * 60;
+  }
 
+  if (timeframe === "5D") {
+    return 15 * 60;
+  }
+
+  if (timeframe === "1M") {
+    return 24 * 60 * 60;
+  }
+
+  return 24 * 60 * 60;
+}
+function getCandleKey(
+  timestamp: string,
+  intervalSeconds: number,
+): number {
+  const timestampSeconds =
+    Math.floor(
+      new Date(timestamp).getTime() / 1000,
+    );
+
+  return Math.floor(
+    timestampSeconds / intervalSeconds,
+  );
+}
+function isValidMarketBar(
+  bar: MarketBar,
+): boolean {
+  if (
+    !Number.isFinite(bar.open) ||
+    !Number.isFinite(bar.high) ||
+    !Number.isFinite(bar.low) ||
+    !Number.isFinite(bar.close)
+  ) {
+    return false;
+  }
+
+  if (
+    bar.open <= 0 ||
+    bar.high <= 0 ||
+    bar.low <= 0 ||
+    bar.close <= 0
+  ) {
+    return false;
+  }
+
+  if (bar.high < bar.low) {
+    return false;
+  }
+
+  if (
+    bar.high < bar.open ||
+    bar.high < bar.close
+  ) {
+    return false;
+  }
+
+  if (
+    bar.low > bar.open ||
+    bar.low > bar.close
+  ) {
+    return false;
+  }
+
+  return true;
+}
 export default function MarketChart({
   bars,
   timeframe,
@@ -44,7 +115,27 @@ export default function MarketChart({
   const candleSeriesRef =
     useRef<any>(null);
 
+  const validBarsRef =
+    useRef<MarketBar[]>([]);
 
+  const timeframeRef =
+    useRef(timeframe);
+
+  const liveIndexRef =
+    useRef(
+      Math.max(
+        bars.filter(
+          isValidMarketBar,
+        ).length - 1,
+        0,
+      ),
+    );
+
+  const liveCandleKeyRef =
+    useRef<number | null>(null);
+
+  timeframeRef.current =
+    timeframe;
   /*
    * CHART CREATION
    */
@@ -87,14 +178,116 @@ export default function MarketChart({
 
         timeScale: {
           borderColor: "#292929",
-          barSpacing: 8,
-          rightOffset: 2,
+          barSpacing: 4,
+          rightOffset: 0,
+          fixLeftEdge: true,
+          fixRightEdge: true,
           timeVisible: true,
           secondsVisible: false,
+
+          tickMarkFormatter: (
+            time: Time,
+          ) => {
+            if (
+              typeof time !== "number"
+            ) {
+              return "";
+            }
+
+            const currentTimeframe =
+              timeframeRef.current;
+
+            const index = Number(time);
+
+            const bar =
+              validBarsRef.current[index];
+
+            if (!bar) {
+              return "";
+            }
+
+            const date =
+              new Date(bar.timestamp);
+
+            const isIntraday =
+              currentTimeframe === "1D" ||
+              currentTimeframe === "5D";
+
+            if (isIntraday) {
+              return date.toLocaleTimeString(
+                "en-US",
+                {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                },
+              );
+            }
+
+            return date.toLocaleDateString(
+              "en-US",
+              {
+                month: "short",
+                day: "numeric",
+              },
+            );
+          },
+        },
+
+        localization: {
+          timeFormatter: (
+            time: Time,
+          ) => {
+            if (
+              typeof time !== "number"
+            ) {
+              return "";
+            }
+
+            const currentTimeframe =
+              timeframeRef.current;
+
+            const index = Number(time);
+
+            const bar =
+              validBarsRef.current[index];
+
+            if (!bar) {
+              return "";
+            }
+
+            const date =
+              new Date(bar.timestamp);
+
+            const isIntraday =
+              currentTimeframe === "1D" ||
+              currentTimeframe === "5D";
+
+            if (isIntraday) {
+              return date.toLocaleString(
+                "en-US",
+                {
+                  month: "short",
+                  day: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                },
+              );
+            }
+
+            return date.toLocaleDateString(
+              "en-US",
+              {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              },
+            );
+          },
         },
       },
     );
-
 
     const candleSeries =
       chart.addSeries(
@@ -153,8 +346,8 @@ export default function MarketChart({
 
 
   /*
-   * HISTORICAL DATA
-   */
+  * HISTORICAL DATA
+  */
   useEffect(() => {
     const candleSeries =
       candleSeriesRef.current;
@@ -166,50 +359,184 @@ export default function MarketChart({
       return;
     }
 
+    const intervalSeconds =
+      getIntervalSeconds(
+        timeframe,
+      );
 
-    const isIntraday =
-      timeframe === "1D" ||
-      timeframe === "5D";
+    const validBars =
+      bars
+        .filter(
+          isValidMarketBar,
+        )
+        .sort(
+          (a, b) =>
+            new Date(
+              a.timestamp,
+            ).getTime() -
+            new Date(
+              b.timestamp,
+            ).getTime(),
+        );
 
+    validBarsRef.current =
+      validBars;
 
-    const candleData =
-      bars.map((bar) => {
-        const date =
-          new Date(bar.timestamp);
-
-        return {
-          time: isIntraday
-            ? (
-                Math.floor(
-                  date.getTime() / 1000,
-                ) as UTCTimestamp
-              )
-            : {
-                year:
-                  date.getUTCFullYear(),
-
-                month:
-                  date.getUTCMonth() + 1,
-
-                day:
-                  date.getUTCDate(),
-              },
-
+    console.table(
+      validBars.map(
+        (bar, index) => ({
+          index,
+          timestamp: new Date(
+            bar.timestamp,
+          ).toLocaleString(
+            "en-US",
+            {
+              timeZone: "Asia/Manila",
+              month: "short",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            },
+          ),
           open: bar.open,
           high: bar.high,
           low: bar.low,
           close: bar.close,
-        };
-      });
+        }),
+      ),
+    );
 
+    const candleData = validBars.map(
+      (bar, index) => ({
+        time: index as UTCTimestamp,
+
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+      }),
+    );
+
+    console.log(
+      "CANDLE COUNT:",
+      candleData.length,
+    );
+
+    console.log(
+      "CANDLE TIMES:",
+      candleData.map(
+        (candle) => candle.time,
+      ).join(", "),
+    );
+
+    console.table(
+      candleData.map((candle, index) => ({
+        arrayIndex: index,
+        time: candle.time,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+      })),
+    );
+
+    for (let i = 1; i < candleData.length; i++) {
+      const previous =
+        candleData[i - 1];
+
+      const current =
+        candleData[i];
+
+      const previousBar =
+        validBars[i - 1];
+
+      const currentBar =
+        validBars[i];
+
+      const priceGap =
+        current.open -
+        previous.close;
+
+      if (Math.abs(priceGap) >= 1) {
+        console.log(
+          "PRICE GAP:",
+          {
+            previousIndex: i - 1,
+
+            previousTimestamp:
+              previousBar.timestamp,
+
+            previousClose:
+              previous.close,
+
+            currentIndex: i,
+
+            currentTimestamp:
+              currentBar.timestamp,
+
+            currentOpen:
+              current.open,
+
+            gap: priceGap,
+          },
+        );
+      }
+    }
+
+    for (let i = 1; i < candleData.length; i++) {
+      const previousTime = Number(candleData[i - 1].time);
+      const currentTime = Number(candleData[i].time);
+
+      if (currentTime - previousTime !== 1) {
+        console.error(
+          "TIME GAP DETECTED",
+          {
+            previousIndex: i - 1,
+            previousTime,
+            currentIndex: i,
+            currentTime,
+          },
+        );
+      }
+    }
+
+    liveIndexRef.current =
+      Math.max(
+        candleData.length - 1,
+        -1,
+      );
+
+    liveCandleKeyRef.current =
+      validBars.length > 0
+        ? getCandleKey(
+            validBars[
+              validBars.length - 1
+            ].timestamp,
+            intervalSeconds,
+          )
+        : null;
+
+    console.log(
+      "CANDLE DEBUG",
+      candleData.map((candle, index) => ({
+        index,
+        time: candle.time,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+      })),
+    );
 
     candleSeries.setData(
       candleData,
     );
 
-
-    chart.timeScale().fitContent();
-
+    chart.timeScale().applyOptions({
+      barSpacing: 2,
+      rightOffset: 0,
+    });
   }, [bars, timeframe]);
 
 
@@ -218,6 +545,7 @@ export default function MarketChart({
    *
    * Uses SSE from FastAPI.
    */
+
   useEffect(() => {
     const eventSource = new EventSource(
       `/api/live/market?symbol=${encodeURIComponent(
@@ -227,7 +555,6 @@ export default function MarketChart({
       )}`,
     );
 
-
     eventSource.onopen = () => {
       console.log(
         "=== LIVE SSE CONNECTED ===",
@@ -235,7 +562,6 @@ export default function MarketChart({
         timeframe,
       );
     };
-
 
     eventSource.onmessage = (
       event,
@@ -246,6 +572,14 @@ export default function MarketChart({
             event.data,
           ) as MarketBar;
 
+        if (!isValidMarketBar(bar)) {
+          console.warn(
+            "Ignoring invalid live market bar:",
+            bar,
+          );
+
+          return;
+        }
 
         const candleSeries =
           candleSeriesRef.current;
@@ -254,35 +588,86 @@ export default function MarketChart({
           return;
         }
 
-
-        const date =
-          new Date(
-            bar.timestamp,
+        const intervalSeconds =
+          getIntervalSeconds(
+            timeframeRef.current,
           );
 
+        const candleKey =
+          getCandleKey(
+            bar.timestamp,
+            intervalSeconds,
+          );
 
-        const isIntraday =
-          timeframe === "1D" ||
-          timeframe === "5D";
+        const currentCandleKey =
+          liveCandleKeyRef.current;
 
+        /*
+        * FIRST LIVE CANDLE
+        */
+        if (currentCandleKey === null) {
+          liveIndexRef.current =
+            validBarsRef.current.length;
 
-        const time = isIntraday
-          ? (
-              Math.floor(
-                date.getTime() / 1000,
-              ) as UTCTimestamp
-            )
-          : {
-              year:
-                date.getUTCFullYear(),
+          liveCandleKeyRef.current =
+            candleKey;
 
-              month:
-                date.getUTCMonth() + 1,
+          validBarsRef.current.push(
+            bar,
+          );
+        }
 
-              day:
-                date.getUTCDate(),
-            };
+        /*
+        * NEWER CANDLE
+        */
+        else if (candleKey > currentCandleKey) {
+          liveIndexRef.current += 1;
 
+          liveCandleKeyRef.current =
+            candleKey;
+
+          validBarsRef.current.push(
+            bar,
+          );
+        }
+
+        /*
+        * CURRENT CANDLE
+        */
+        else if (candleKey === currentCandleKey) {
+          validBarsRef.current[
+            liveIndexRef.current
+          ] = bar;
+        }
+
+        /*
+        * OLD / DELAYED CANDLE
+        */
+        else {
+          console.warn(
+            "Ignoring old live candle:",
+            {
+              candleKey,
+              currentCandleKey,
+              timestamp: bar.timestamp,
+            },
+          );
+
+          return;
+        }
+
+        /*
+        * IMPORTANT:
+        * The chart uses candle indexes as time.
+        *
+        * Historical candles:
+        * 0, 1, 2, 3...
+        *
+        * Live candles continue:
+        * 141, 142, 143...
+        */
+        const time =
+          liveIndexRef.current as UTCTimestamp;
 
         candleSeries.update({
           time,
@@ -304,7 +689,6 @@ export default function MarketChart({
       }
     };
 
-
     eventSource.onerror = () => {
       console.error(
         "=== LIVE SSE ERROR ===",
@@ -312,7 +696,6 @@ export default function MarketChart({
         timeframe,
       );
     };
-
 
     return () => {
       eventSource.close();
@@ -325,7 +708,6 @@ export default function MarketChart({
     };
 
   }, [symbol, timeframe]);
-
 
   return (
     <div

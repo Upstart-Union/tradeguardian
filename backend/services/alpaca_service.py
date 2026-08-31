@@ -1,3 +1,5 @@
+import calendar
+
 from alpaca.trading.client import TradingClient
 from core.config import ALPACA_API_KEY, ALPACA_SECRET_KEY
 
@@ -71,6 +73,7 @@ def get_market_bars(
     timeframe: str = "1M",
 ):
     symbol = symbol.upper()
+    timeframe = timeframe.upper()
 
     end = datetime.now(timezone.utc)
 
@@ -80,7 +83,7 @@ def get_market_bars(
                 5,
                 TimeFrameUnit.Minute,
             ),
-            "days": 2,
+            "days": 3,
         },
 
         "5D": {
@@ -93,22 +96,22 @@ def get_market_bars(
 
         "1M": {
             "alpaca_timeframe": TimeFrame.Day,
-            "days": 35,
+            "days": 45,
         },
 
         "3M": {
             "alpaca_timeframe": TimeFrame.Day,
-            "days": 100,
+            "days": 120,
         },
 
         "1Y": {
             "alpaca_timeframe": TimeFrame.Day,
-            "days": 370,
+            "days": 400,
         },
     }
 
     config = timeframe_map.get(
-        timeframe.upper(),
+        timeframe,
     )
 
     if config is None:
@@ -137,10 +140,37 @@ def get_market_bars(
     )
 
     # -----------------------------------------------------
-    # 5D = exactly the latest 5 trading sessions
+    # 1D
+    # Keep only the latest available trading session.
     # -----------------------------------------------------
 
-    if timeframe.upper() == "5D":
+    if timeframe == "1D":
+
+        if raw_bars:
+            latest_session = (
+                raw_bars[-1]
+                .timestamp
+                .astimezone(timezone.utc)
+                .date()
+            )
+
+            raw_bars = [
+                bar
+                for bar in raw_bars
+                if (
+                    bar.timestamp
+                    .astimezone(timezone.utc)
+                    .date()
+                    == latest_session
+                )
+            ]
+
+    # -----------------------------------------------------
+    # 5D
+    # Keep exactly the latest five trading sessions.
+    # -----------------------------------------------------
+
+    elif timeframe == "5D":
 
         trading_dates = []
 
@@ -153,7 +183,6 @@ def get_market_bars(
             )
 
             if trading_date not in trading_dates:
-
                 trading_dates.append(
                     trading_date
                 )
@@ -176,30 +205,93 @@ def get_market_bars(
             )
         ]
 
-    market_bars = []
+    # -----------------------------------------------------
+    # 1M
+    # -----------------------------------------------------
 
-    for bar in raw_bars:
+    elif timeframe == "1M":
 
-        market_bars.append(
-            {
-                "timestamp":
-                    bar.timestamp.isoformat(),
-
-                "open":
-                    float(bar.open),
-
-                "high":
-                    float(bar.high),
-
-                "low":
-                    float(bar.low),
-
-                "close":
-                    float(bar.close),
-
-                "volume":
-                    float(bar.volume),
-            }
+        cutoff = subtract_months(
+            end,
+            1,
         )
 
-    return market_bars
+        raw_bars = [
+            bar
+            for bar in raw_bars
+            if bar.timestamp >= cutoff
+        ]
+
+    # -----------------------------------------------------
+    # 3M
+    # -----------------------------------------------------
+
+    elif timeframe == "3M":
+
+        cutoff = subtract_months(
+            end,
+            3,
+        )
+
+        raw_bars = [
+            bar
+            for bar in raw_bars
+            if bar.timestamp >= cutoff
+        ]
+
+    # -----------------------------------------------------
+    # 1Y
+    # -----------------------------------------------------
+
+    elif timeframe == "1Y":
+
+        cutoff = subtract_months(
+            end,
+            12,
+        )
+
+        raw_bars = [
+            bar
+            for bar in raw_bars
+            if bar.timestamp >= cutoff
+        ]
+
+    return [
+        {
+            "timestamp": bar.timestamp.isoformat(),
+            "open": float(bar.open),
+            "high": float(bar.high),
+            "low": float(bar.low),
+            "close": float(bar.close),
+            "volume": float(bar.volume),
+        }
+        for bar in raw_bars
+    ]
+
+def subtract_months(
+    value: datetime,
+    months: int,
+) -> datetime:
+    month_index = (
+        value.year * 12
+        + value.month
+        - 1
+        - months
+    )
+
+    year = month_index // 12
+    month = month_index % 12 + 1
+
+    day = min(
+        value.day,
+        calendar.monthrange(
+            year,
+            month,
+        )[1],
+    )
+
+    return value.replace(
+        year=year,
+        month=month,
+        day=day,
+    )
