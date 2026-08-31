@@ -101,6 +101,31 @@ function isValidMarketBar(
 
   return true;
 }
+
+function toContinuousCandle(
+  bar: MarketBar,
+  time: UTCTimestamp,
+  previousClose?: number,
+) {
+  const open = previousClose ?? bar.open;
+
+  return {
+    time,
+    open,
+    high: Math.max(
+      bar.high,
+      open,
+      bar.close,
+    ),
+    low: Math.min(
+      bar.low,
+      open,
+      bar.close,
+    ),
+    close: bar.close,
+  };
+}
+
 export default function MarketChart({
   bars,
   timeframe,
@@ -382,124 +407,15 @@ export default function MarketChart({
     validBarsRef.current =
       validBars;
 
-    console.table(
-      validBars.map(
-        (bar, index) => ({
-          index,
-          timestamp: new Date(
-            bar.timestamp,
-          ).toLocaleString(
-            "en-US",
-            {
-              timeZone: "Asia/Manila",
-              month: "short",
-              day: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            },
-          ),
-          open: bar.open,
-          high: bar.high,
-          low: bar.low,
-          close: bar.close,
-        }),
-      ),
-    );
-
     const candleData = validBars.map(
       (bar, index) => ({
-        time: index as UTCTimestamp,
-
-        open: bar.open,
-        high: bar.high,
-        low: bar.low,
-        close: bar.close,
+        ...toContinuousCandle(
+          bar,
+          index as UTCTimestamp,
+          validBars[index - 1]?.close,
+        ),
       }),
     );
-
-    console.log(
-      "CANDLE COUNT:",
-      candleData.length,
-    );
-
-    console.log(
-      "CANDLE TIMES:",
-      candleData.map(
-        (candle) => candle.time,
-      ).join(", "),
-    );
-
-    console.table(
-      candleData.map((candle, index) => ({
-        arrayIndex: index,
-        time: candle.time,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-      })),
-    );
-
-    for (let i = 1; i < candleData.length; i++) {
-      const previous =
-        candleData[i - 1];
-
-      const current =
-        candleData[i];
-
-      const previousBar =
-        validBars[i - 1];
-
-      const currentBar =
-        validBars[i];
-
-      const priceGap =
-        current.open -
-        previous.close;
-
-      if (Math.abs(priceGap) >= 1) {
-        console.log(
-          "PRICE GAP:",
-          {
-            previousIndex: i - 1,
-
-            previousTimestamp:
-              previousBar.timestamp,
-
-            previousClose:
-              previous.close,
-
-            currentIndex: i,
-
-            currentTimestamp:
-              currentBar.timestamp,
-
-            currentOpen:
-              current.open,
-
-            gap: priceGap,
-          },
-        );
-      }
-    }
-
-    for (let i = 1; i < candleData.length; i++) {
-      const previousTime = Number(candleData[i - 1].time);
-      const currentTime = Number(candleData[i].time);
-
-      if (currentTime - previousTime !== 1) {
-        console.error(
-          "TIME GAP DETECTED",
-          {
-            previousIndex: i - 1,
-            previousTime,
-            currentIndex: i,
-            currentTime,
-          },
-        );
-      }
-    }
 
     liveIndexRef.current =
       Math.max(
@@ -516,18 +432,6 @@ export default function MarketChart({
             intervalSeconds,
           )
         : null;
-
-    console.log(
-      "CANDLE DEBUG",
-      candleData.map((candle, index) => ({
-        index,
-        time: candle.time,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-      })),
-    );
 
     candleSeries.setData(
       candleData,
@@ -669,17 +573,15 @@ export default function MarketChart({
         const time =
           liveIndexRef.current as UTCTimestamp;
 
-        candleSeries.update({
-          time,
-
-          open: bar.open,
-
-          high: bar.high,
-
-          low: bar.low,
-
-          close: bar.close,
-        });
+        candleSeries.update(
+          toContinuousCandle(
+            bar,
+            time,
+            validBarsRef.current[
+              liveIndexRef.current - 1
+            ]?.close,
+          ),
+        );
 
       } catch (error) {
         console.error(
@@ -716,3 +618,4 @@ export default function MarketChart({
     />
   );
 }
+
