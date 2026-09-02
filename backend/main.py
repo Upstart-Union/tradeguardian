@@ -30,6 +30,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://supreme-fortnight-g47pp96xvg7xh9wr-3000.app.github.dev",
+        "http://localhost:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],

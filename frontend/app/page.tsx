@@ -1,6 +1,151 @@
-import React from 'react';
+'use client';
 
-export const PrecisionInstitutionalTradingSystem: React.FC = () => {
+import React, { useState, useEffect, useRef } from 'react';
+import AIOpportunity from './pages/ai_opportunity';
+import { Sidebar } from './components/Sidebar';
+
+// 1. Backend API Response Interfaces
+interface BackendRiskCheckItem {
+  status: 'PASS' | 'FAIL';
+  reason: string;
+}
+
+interface BackendAnalysisResponse {
+  message: string;
+  proposal: {
+    symbol: string;
+    side: string;
+    quantity: number;
+    current_price: number;
+    trade_value: number;
+  };
+  risk_metrics: {
+    account_equity: number;
+    buying_power: number;
+    trade_percent_of_equity: number;
+    existing_position_value: number;
+    projected_position_value: number;
+    projected_concentration_percent: number;
+  };
+  risk_checks: {
+    exposure: BackendRiskCheckItem;
+    concentration: BackendRiskCheckItem;
+    buying_power: BackendRiskCheckItem;
+    position: BackendRiskCheckItem;
+  };
+  decision: {
+    status: 'APPROVED' | 'BLOCKED' | 'WARNING';
+    reasons: string[];
+  };
+}
+
+export default function TradeAnalysisPage() {
+  // ALL HOOKS MUST BE DECLARED FIRST AT THE TOP LEVEL
+  const [currentView, setCurrentView] = useState<'analysis' | 'ai_opportunity'>('analysis');
+  const [timeframe, setTimeframe] = useState<'1D' | '5D' | '1M' | '3M' | '1Y'>('1M');
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+
+  // Trade form inputs
+  const [symbol, setSymbol] = useState<string>('AAPL');
+  const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
+  const [quantity, setQuantity] = useState<number>(10);
+  const [orderType, setOrderType] = useState<string>('Market');
+  const [entryMode, setEntryMode] = useState<'MARKET' | 'LIMIT'>('MARKET');
+  const [limitPrice, setLimitPrice] = useState<string>('321.25');
+  const [stopLoss, setStopLoss] = useState<string>('');
+  const [takeProfit, setTakeProfit] = useState<string>('');
+
+  // Analysis state
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisResult, setAnalysisResult] = useState<BackendAnalysisResponse | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // TradingView Chart Effect (must be declared before any return)
+  useEffect(() => {
+    if (currentView !== 'analysis') return;
+    if (!chartContainerRef.current) return;
+
+    chartContainerRef.current.innerHTML = '';
+
+    const widgetDiv = document.createElement('div');
+    widgetDiv.className = 'tradingview-widget-container__widget';
+    widgetDiv.style.height = '100%';
+    widgetDiv.style.width = '100%';
+    chartContainerRef.current.appendChild(widgetDiv);
+
+    const intervalMap: Record<string, string> = {
+      '1D': '5',
+      '5D': '30',
+      '1M': 'D',
+      '3M': 'D',
+      '1Y': 'W',
+    };
+
+    const script = document.createElement('script');
+    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+    script.type = 'text/javascript';
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+      autosize: true,
+      symbol: symbol.includes(':') ? symbol : `NASDAQ:${symbol}`,
+      interval: intervalMap[timeframe] || 'D',
+      timezone: 'Etc/UTC',
+      theme: 'dark',
+      style: '1',
+      locale: 'en',
+      enable_publishing: false,
+      backgroundColor: 'rgba(19, 19, 21, 1)',
+      gridColor: 'rgba(43, 42, 44, 0.4)',
+      hide_top_toolbar: true,
+      hide_legend: false,
+      save_image: false,
+      calendar: false,
+      hide_volume: false,
+      support_host: 'https://www.tradingview.com',
+    });
+
+    chartContainerRef.current.appendChild(script);
+  }, [symbol, timeframe, currentView]);
+
+  // TradeGuardian AI Risk Analysis Function
+  const handleAnalyzeTrade = async () => {
+    setIsAnalyzing(true);
+    setErrorMessage(null);
+
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
+    try {
+      const response = await fetch(`${backendUrl}/analyze/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          symbol: symbol.trim().toUpperCase(),
+          side: side.toLowerCase(), // FastAPI expects "buy" or "sell"
+          quantity: Number(quantity),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+      }
+
+      const data: BackendAnalysisResponse = await response.json();
+      setAnalysisResult(data);
+    } catch (err: any) {
+      console.error('Error connecting to TradeGuardian backend:', err);
+      setErrorMessage(err.message || 'Failed to connect to TradeGuardian API');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // CONDITIONAL VIEW SWITCH (NOW SAFELY PLACED AFTER ALL HOOKS)
+  if (currentView === 'ai_opportunity') {
+    return <AIOpportunity onNavigate={(tab) => setCurrentView(tab)} />;
+  }
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#131315] text-[#e4e4e7] font-sans antialiased">
       {/* Embedded fonts and custom scrollbar styles to ensure identical rendering */}
@@ -25,305 +170,7 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
 
       <div className="flex flex-1 overflow-hidden h-full">
         {/* BEGIN: Sidebar */}
-        <aside
-          className="w-64 border-r border-[#2b2a2c] bg-[#131315] flex flex-col shrink-0 custom-scrollbar h-full"
-          style={{ width: '256px' }}
-        >
-          <div className="p-4 flex items-center justify-between border-b border-[#2b2a2c]/50">
-            <div className="flex items-center gap-3">
-              <img
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuBaJuoD2zc70ThZz24wu4V2g-CLlJn-zsbDIwcryDpqKYmntpN7nEy_j8URp21iJYwlAiQX33qaquMQ2GeNKJBTB9DDIoMOkkTtuuDTxOHEejpMvsj0FirC-Hgp61O-ZiquIStJx9O2mecX6HfP9vCiitpRe_WW3DhStgcJHMJDcFW4nime8CM2Q6MUFN95xaOJoXqkPjY5Tv4gTIqHmzyqDQO64J7GpubjiAZ9VgMHA0awrxyzgBEFW54ngltlYMbTEw"
-                alt="Alpaca Logo"
-                className="w-8 h-8 object-contain rounded-full"
-              />
-              <div>
-                <div className="font-bold text-[#e4e4e7]">Alpaca</div>
-                <div className="text-[10px] text-[#a1a1aa]">TradeGuardian AI</div>
-              </div>
-            </div>
-            <svg
-              className="text-[#a1a1aa]"
-              fill="none"
-              height="16"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              width="16"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          </div>
-
-          <nav className="flex-1 py-4 overflow-y-auto custom-scrollbar">
-            <ul className="space-y-1">
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 rounded-md text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] transition-colors"
-                  href="#"
-                >
-                  <svg
-                    fill="none"
-                    height="18"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    width="18"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <rect height="9" rx="1" width="7" x="3" y="3" />
-                    <rect height="5" rx="1" width="7" x="14" y="3" />
-                    <rect height="9" rx="1" width="7" x="14" y="12" />
-                    <rect height="5" rx="1" width="7" x="3" y="16" />
-                  </svg>
-                  <span className="font-medium text-sm">Dashboard</span>
-                </a>
-              </li>
-
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 bg-[#facc15]/10 rounded-md border-l-2 border-[#facc15] text-[#facc15]"
-                  href="#"
-                >
-                  <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
-                    query_stats
-                  </span>
-                  <span className="font-medium text-sm">Trade Analysis</span>
-                </a>
-              </li>
-
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
-                  href="#"
-                >
-                  <svg
-                    fill="none"
-                    height="18"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    width="18"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  <span className="font-medium text-sm">Activity Log</span>
-                </a>
-              </li>
-
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
-                  href="#"
-                >
-                  <svg
-                    fill="none"
-                    height="18"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    width="18"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                  </svg>
-                  <span className="font-medium text-sm">AI Opportunities</span>
-                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded border bg-purple-500/10 border-purple-500/30 text-purple-400">
-                    NEW
-                  </span>
-                </a>
-              </li>
-
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
-                  href="#"
-                >
-                  <svg
-                    fill="none"
-                    height="18"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    width="18"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                  <span className="font-medium text-sm">Settings</span>
-                </a>
-              </li>
-
-              <li className="my-4 border-t border-[#2b2a2c]/50 mx-4" />
-
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
-                  href="#"
-                >
-                  <svg
-                    fill="none"
-                    height="18"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    width="18"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path d="M3 3v18h18" />
-                    <path d="M18 17V9" />
-                    <path d="M13 17V5" />
-                    <path d="M8 17v-3" />
-                  </svg>
-                  <span className="font-medium text-sm">Analysis History</span>
-                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500 text-red-500">
-                    UNAVAILABLE
-                  </span>
-                </a>
-              </li>
-
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
-                  href="#"
-                >
-                  <svg
-                    fill="none"
-                    height="18"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    width="18"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <circle cx="12" cy="12" r="4" />
-                  </svg>
-                  <span className="font-medium text-sm">Positions</span>
-                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500 text-red-500">
-                    UNAVAILABLE
-                  </span>
-                </a>
-              </li>
-
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
-                  href="#"
-                >
-                  <svg
-                    fill="none"
-                    height="18"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    width="18"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <line x1="8" x2="21" y1="6" y2="6" />
-                    <line x1="8" x2="21" y1="12" y2="12" />
-                    <line x1="8" x2="21" y1="18" y2="18" />
-                    <line x1="3" x2="3.01" y1="6" y2="6" />
-                    <line x1="3" x2="3.01" y1="12" y2="12" />
-                    <line x1="3" x2="3.01" y1="18" y2="18" />
-                  </svg>
-                  <span className="font-medium text-sm">Orders</span>
-                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500 text-red-500">
-                    UNAVAILABLE
-                  </span>
-                </a>
-              </li>
-
-              <li className="px-3">
-                <a
-                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
-                  href="#"
-                >
-                  <svg
-                    fill="none"
-                    height="18"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                    width="18"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path d="M3 3v18h18" />
-                    <path d="m19 9-5 5-4-4-3 3" />
-                  </svg>
-                  <span className="font-medium text-sm">Performance</span>
-                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500 text-red-500">
-                    UNAVAILABLE
-                  </span>
-                </a>
-              </li>
-
-              <li className="my-4 border-t border-[#2b2a2c]/50 mx-4" />
-            </ul>
-
-            <div className="px-6 py-4">
-              <h3 className="text-[10px] font-bold text-[#a1a1aa] mb-4 uppercase tracking-widest">
-                ACCOUNT
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <div className="text-xs text-[#a1a1aa] mb-1">Total Equity</div>
-                  <div className="text-xl font-bold font-sans text-[#e4e4e7]">$100,000.00</div>
-                </div>
-                <div>
-                  <div className="text-xs text-[#a1a1aa] mb-1">Buying Power</div>
-                  <div className="text-xl font-bold font-sans text-[#e4e4e7]">$400,000.00</div>
-                </div>
-                <div>
-                  <div className="text-xs text-[#a1a1aa] mb-1">Open Positions</div>
-                  <div className="text-[15px] font-bold font-sans text-[#e4e4e7]">0</div>
-                </div>
-              </div>
-            </div>
-          </nav>
-
-          <div className="p-4 border-t border-[#2b2a2c] mt-auto">
-            <button className="flex items-center justify-between w-full px-2 py-2 text-sm text-[#a1a1aa] hover:text-[#e4e4e7] rounded transition-colors">
-              <div className="flex items-center gap-3 px-2">
-                <svg
-                  fill="none"
-                  height="16"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  viewBox="0 0 24 24"
-                  width="16"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
-                <span className="font-medium">Collapse</span>
-              </div>
-            </button>
-          </div>
-        </aside>
+        <Sidebar activeTab="analysis" onNavigate={(tab) => setCurrentView(tab)} />
         {/* END: Sidebar */}
 
         {/* BEGIN: Main Content Area */}
@@ -361,33 +208,34 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
           <div className="flex-1 flex overflow-hidden">
             <main className="flex flex-col min-w-0 overflow-y-auto custom-scrollbar flex-1 pr-4 pt-6 pl-6 pb-6">
               {/* Chart Panel */}
-              <div className="bg-[#131315] border border-[#2b2a2c] rounded-lg p-6 flex flex-col shrink-0 flex-1 mb-4">
+              <div className="bg-[#131315] border border-[#2b2a2c] rounded-lg p-6 flex flex-col shrink-0 min-h-[460px] flex-1 mb-4">
                 <div className="flex items-start justify-between mb-4">
                   <div>
-                    <h2 className="text-2xl font-bold flex items-center gap-2">AAPL</h2>
+                    <h2 className="text-2xl font-bold flex items-center gap-2">{symbol}</h2>
                     <div className="flex items-baseline gap-2 mt-1">
-                      <span className="text-xl font-bold">$321.25</span>
+                      <span className="text-xl font-bold">
+                        ${analysisResult ? analysisResult.proposal.current_price.toFixed(2) : '321.25'}
+                      </span>
                       <span className="text-sm font-medium text-[#10b981]">+2.34 (0.73%)</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 bg-[#0e0e10] border border-[#2b2a2c] rounded p-1">
-                    <button className="px-3 py-1 text-xs font-medium text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
-                      1D
-                    </button>
-                    <button className="px-3 py-1 text-xs font-medium text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
-                      5D
-                    </button>
-                    <button className="px-3 py-1 text-xs font-bold text-[#131315] bg-[#facc15] rounded">
-                      1M
-                    </button>
-                    <button className="px-3 py-1 text-xs font-medium text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
-                      3M
-                    </button>
-                    <button className="px-3 py-1 text-xs font-medium text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
-                      1Y
-                    </button>
+                    {(['1D', '5D', '1M', '3M', '1Y'] as const).map((tf) => (
+                      <button
+                        key={tf}
+                        type="button"
+                        onClick={() => setTimeframe(tf)}
+                        className={`px-3 py-1 text-xs transition-colors rounded ${
+                          timeframe === tf
+                            ? 'font-bold text-[#131315] bg-[#facc15]'
+                            : 'font-medium text-[#a1a1aa] hover:text-[#e4e4e7]'
+                        }`}
+                      >
+                        {tf}
+                      </button>
+                    ))}
                     <div className="w-px h-4 bg-[#2b2a2c] mx-1" />
-                    <button className="p-1 text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
+                    <button type="button" className="p-1 text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
                       <svg
                         fill="none"
                         height="14"
@@ -405,7 +253,11 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                     </button>
                   </div>
                 </div>
-                <div className="flex-1" />
+
+                {/* TradingView Chart Container */}
+                <div className="flex-1 w-full min-h-[360px] relative overflow-hidden rounded">
+                  <div ref={chartContainerRef} className="w-full h-full" />
+                </div>
               </div>
 
               {/* Trade Details Panel */}
@@ -446,10 +298,10 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                         </svg>
                       </div>
                       <input
-                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 pl-10 pr-8 text-sm font-medium text-[#e4e4e7] focus:outline-none focus:border-[#2b2a2c] cursor-pointer"
-                        readOnly
+                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 pl-10 pr-8 text-sm font-medium text-[#e4e4e7] focus:outline-none focus:border-[#facc15] cursor-text"
                         type="text"
-                        defaultValue="AAPL"
+                        value={symbol}
+                        onChange={(e) => setSymbol(e.target.value.toUpperCase())}
                       />
                     </div>
                   </div>
@@ -459,10 +311,26 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                       Side
                     </label>
                     <div className="flex bg-[#0e0e10] rounded border border-[#2b2a2c]">
-                      <button className="flex-1 py-2.5 text-xs font-bold text-[#10b981] bg-[#1c2921] border border-[#10b981]/30 rounded shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => setSide('BUY')}
+                        className={`flex-1 py-2.5 text-xs font-bold rounded shadow-sm transition-colors ${
+                          side === 'BUY'
+                            ? 'text-[#10b981] bg-[#1c2921] border border-[#10b981]/30'
+                            : 'text-[#a1a1aa] hover:text-[#e4e4e7]'
+                        }`}
+                      >
                         BUY
                       </button>
-                      <button className="flex-1 py-2.5 text-xs font-bold text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
+                      <button
+                        type="button"
+                        onClick={() => setSide('SELL')}
+                        className={`flex-1 py-2.5 text-xs font-bold rounded shadow-sm transition-colors ${
+                          side === 'SELL'
+                            ? 'text-[#ef4444] bg-[#291c1c] border border-[#ef4444]/30'
+                            : 'text-[#a1a1aa] hover:text-[#e4e4e7]'
+                        }`}
+                      >
                         SELL
                       </button>
                     </div>
@@ -474,9 +342,11 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                     </label>
                     <div className="relative">
                       <input
-                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:border-[#2b2a2c]"
+                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:border-[#facc15]"
                         type="number"
-                        defaultValue="10"
+                        min="1"
+                        value={quantity}
+                        onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
                       />
                     </div>
                     <div className="text-[10px] text-[#a1a1aa]/60 mt-1">
@@ -492,8 +362,9 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                     </label>
                     <div className="relative">
                       <select
-                        defaultValue="Market"
-                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:border-[#2b2a2c] appearance-none cursor-pointer"
+                        value={orderType}
+                        onChange={(e) => setOrderType(e.target.value)}
+                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:border-[#facc15] appearance-none cursor-pointer"
                       >
                         <option value="Market">Market</option>
                         <option value="Limit">Limit</option>
@@ -524,18 +395,33 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                       Entry Price
                     </label>
                     <div className="flex bg-[#0e0e10] rounded border border-[#2b2a2c] overflow-hidden">
-                      <button className="px-6 py-2.5 text-xs font-bold text-[#131315] bg-[#facc15]">
+                      <button
+                        type="button"
+                        onClick={() => setEntryMode('MARKET')}
+                        className={`px-6 py-2.5 text-xs font-bold transition-colors ${
+                          entryMode === 'MARKET' ? 'text-[#131315] bg-[#facc15]' : 'text-[#a1a1aa] hover:text-[#e4e4e7]'
+                        }`}
+                      >
                         MARKET
                       </button>
-                      <button className="px-6 py-2.5 text-xs font-bold text-[#a1a1aa] hover:text-[#e4e4e7] border-r border-[#2b2a2c]/50">
+                      <button
+                        type="button"
+                        onClick={() => setEntryMode('LIMIT')}
+                        className={`px-6 py-2.5 text-xs font-bold border-r border-[#2b2a2c]/50 transition-colors ${
+                          entryMode === 'LIMIT' ? 'text-[#131315] bg-[#facc15]' : 'text-[#a1a1aa] hover:text-[#e4e4e7]'
+                        }`}
+                      >
                         LIMIT
                       </button>
                       <input
-                        className="flex-1 bg-transparent border-none py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:ring-0 text-right opacity-50 cursor-not-allowed"
-                        disabled
+                        className={`flex-1 bg-transparent border-none py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:ring-0 text-right ${
+                          entryMode === 'MARKET' ? 'opacity-50 cursor-not-allowed' : 'cursor-text'
+                        }`}
+                        disabled={entryMode === 'MARKET'}
                         placeholder="0.00"
                         type="text"
-                        defaultValue="0.00"
+                        value={entryMode === 'MARKET' ? '0.00' : limitPrice}
+                        onChange={(e) => setLimitPrice(e.target.value)}
                       />
                     </div>
                   </div>
@@ -547,9 +433,11 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                       Stop Loss
                     </label>
                     <input
-                      className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#a1a1aa] focus:outline-none focus:border-[#2b2a2c]"
+                      className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:border-[#facc15]"
                       placeholder="Optional"
                       type="text"
+                      value={stopLoss}
+                      onChange={(e) => setStopLoss(e.target.value)}
                     />
                     <div className="text-[10px] text-[#a1a1aa]/60 mt-1">Price or %</div>
                   </div>
@@ -558,16 +446,18 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                       Take Profit
                     </label>
                     <input
-                      className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#a1a1aa] focus:outline-none focus:border-[#2b2a2c]"
+                      className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:border-[#facc15]"
                       placeholder="Optional"
                       type="text"
+                      value={takeProfit}
+                      onChange={(e) => setTakeProfit(e.target.value)}
                     />
                     <div className="text-[10px] text-[#a1a1aa]/60 mt-1">Price or %</div>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between border-t border-[#2b2a2c] pt-4">
-                  <button className="flex items-center gap-2 text-xs font-medium text-[#facc15] hover:text-[#facc15]/80 transition-colors">
+                  <button type="button" className="flex items-center gap-2 text-xs font-medium text-[#facc15] hover:text-[#facc15]/80 transition-colors">
                     <svg
                       fill="none"
                       height="14"
@@ -597,22 +487,41 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                       <path d="m6 9 6 6 6-6" />
                     </svg>
                   </button>
-                  <button className="flex items-center gap-2 bg-[#facc15] text-[#131315] font-bold text-sm px-8 py-3 rounded hover:bg-[#facc15]/90 transition-colors">
-                    ANALYZE TRADE
-                    <svg
-                      fill="none"
-                      height="16"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
-                      width="16"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path d="M5 12h14" />
-                      <path d="m12 5 7 7-7 7" />
-                    </svg>
+
+                  {/* ACTIVE ANALYZE TRADE BUTTON */}
+                  <button
+                    type="button"
+                    onClick={handleAnalyzeTrade}
+                    disabled={isAnalyzing}
+                    className="flex items-center gap-2 bg-[#facc15] text-[#131315] font-bold text-sm px-8 py-3 rounded hover:bg-[#facc15]/90 transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-1 h-4 w-4 text-[#131315]" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        ANALYZING RISK...
+                      </>
+                    ) : (
+                      <>
+                        ANALYZE TRADE
+                        <svg
+                          fill="none"
+                          height="16"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                          width="16"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path d="M5 12h14" />
+                          <path d="m12 5 7 7-7 7" />
+                        </svg>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -645,7 +554,7 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
 
             {/* BEGIN: Right Side Panels */}
             <aside
-              className="flex flex-col border-[#2b2a2c] bg-[#131315] shrink-0 h-full p-6 overflow-y-auto custom-scrollbar"
+              className="flex flex-col border-l border-[#2b2a2c] bg-[#131315] shrink-0 h-full p-6 overflow-y-auto custom-scrollbar"
               style={{ width: '400px' }}
             >
               {/* Risk Analysis Panel */}
@@ -665,42 +574,94 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                       strokeWidth="2"
                       viewBox="0 0 24 24"
                       width="12"
-                      xmlns="http://www.w3.org/2000/svg"
                     >
                       <circle cx="12" cy="12" r="10" />
                       <path d="M12 16v-4" />
                       <path d="M12 8h.01" />
                     </svg>
                   </div>
-                  <span className="text-[9px] font-bold text-purple-400 border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 rounded">
-                    STANDBY
-                  </span>
+                  {analysisResult ? (
+                    <span className="text-[9px] font-bold text-[#10b981] border border-[#10b981]/30 bg-[#10b981]/10 px-2 py-0.5 rounded">
+                      EVALUATED
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-bold text-purple-400 border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 rounded">
+                      STANDBY
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex-1 p-6 relative overflow-y-auto">
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 bg-[#131315]/80 backdrop-blur-[1px]">
-                    <div className="text-[#a1a1aa] mb-3">
-                      <svg
-                        fill="none"
-                        height="32"
-                        stroke="currentColor"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="1.5"
-                        viewBox="0 0 24 24"
-                        width="32"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                        <path d="m9 12 2 2 4-4" />
-                      </svg>
+                  {!analysisResult ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 bg-[#131315]/80 backdrop-blur-[1px]">
+                      <div className="text-[#a1a1aa] mb-3">
+                        <svg fill="none" height="32" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="32">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                          <path d="m9 12 2 2 4-4" />
+                        </svg>
+                      </div>
+                      <p className="text-xs text-[#a1a1aa]">
+                        Run an analysis to see<br />TradeGuardian risk checks.
+                      </p>
+                      {errorMessage && (
+                        <p className="text-xs text-red-400 mt-2">{errorMessage}</p>
+                      )}
                     </div>
-                    <p className="text-xs text-[#a1a1aa]">
-                      Run an analysis to see
-                      <br />
-                      TradeGuardian risk checks.
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Metric Cards from Alpaca Backend */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-3 bg-[#0e0e10] border border-[#2b2a2c] rounded">
+                          <div className="text-[10px] text-[#a1a1aa] uppercase">Trade Value</div>
+                          <div className="text-lg font-bold text-[#e4e4e7] mt-0.5">
+                            ${analysisResult.proposal.trade_value.toLocaleString()}
+                          </div>
+                          <div className="text-[9px] text-[#a1a1aa]">
+                            @ ${analysisResult.proposal.current_price} / share
+                          </div>
+                        </div>
+                        <div className="p-3 bg-[#0e0e10] border border-[#2b2a2c] rounded">
+                          <div className="text-[10px] text-[#a1a1aa] uppercase">Equity Exposure</div>
+                          <div className="text-lg font-bold text-[#10b981] mt-0.5">
+                            {analysisResult.risk_metrics.trade_percent_of_equity}%
+                          </div>
+                          <div className="text-[9px] text-[#a1a1aa]">Portfolio Share</div>
+                        </div>
+                      </div>
+
+                      {/* Checks returned by routes/analyze.py */}
+                      <div className="space-y-2 pt-2 border-t border-[#2b2a2c]/50">
+                        <div className="text-[10px] font-bold text-[#a1a1aa] uppercase tracking-wider">
+                          TradeGuardian Guardrails
+                        </div>
+
+                        {[
+                          { title: 'Buying Power Check', check: analysisResult.risk_checks.buying_power },
+                          { title: 'Trade Exposure (≤10%)', check: analysisResult.risk_checks.exposure },
+                          { title: 'Concentration (≤25%)', check: analysisResult.risk_checks.concentration },
+                          { title: 'Position Validation', check: analysisResult.risk_checks.position },
+                        ].map((item, idx) => (
+                          <div key={idx} className="p-2.5 bg-[#0e0e10] border border-[#2b2a2c]/60 rounded text-xs space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-[#e4e4e7]">{item.title}</span>
+                              <span
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                  item.check.status === 'PASS'
+                                    ? 'bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/30'
+                                    : 'bg-red-500/10 text-red-400 border border-red-500/30'
+                                }`}
+                              >
+                                {item.check.status === 'PASS' ? 'PASSED' : 'FAILED'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-[#a1a1aa] leading-tight">
+                              {item.check.reason}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -711,49 +672,81 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
                     <h3 className="text-[11px] font-bold text-[#e4e4e7] uppercase tracking-widest">
                       GUARDIAN DECISION
                     </h3>
-                    <svg
-                      className="text-[#a1a1aa]"
-                      fill="none"
-                      height="12"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
-                      width="12"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
+                    <svg className="text-[#a1a1aa]" fill="none" height="12" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="12">
                       <circle cx="12" cy="12" r="10" />
                       <path d="M12 16v-4" />
                       <path d="M12 8h.01" />
                     </svg>
                   </div>
-                  <span className="text-[9px] font-bold text-purple-400 border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 rounded">
-                    STANDBY
-                  </span>
-                </div>
-                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-[#a1a1aa]">
-                  <div className="text-[#a1a1aa] mb-3">
-                    <svg
-                      fill="none"
-                      height="36"
-                      stroke="currentColor"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="1.5"
-                      viewBox="0 0 24 24"
-                      width="36"
-                      xmlns="http://www.w3.org/2000/svg"
+                  {analysisResult ? (
+                    <span
+                      className={`text-[9px] font-bold border px-2 py-0.5 rounded ${
+                        analysisResult.decision.status === 'APPROVED'
+                          ? 'text-[#10b981] border-[#10b981]/30 bg-[#10b981]/10'
+                          : 'text-red-400 border-red-500/30 bg-red-500/10'
+                      }`}
                     >
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                      <path d="m9 12 2 2 4-4" />
-                    </svg>
-                  </div>
-                  <p className="text-xs">
-                    Submit a trade to receive
-                    <br />
-                    TradeGuardian decision.
-                  </p>
+                      {analysisResult.decision.status}
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-bold text-purple-400 border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 rounded">
+                      STANDBY
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-[#a1a1aa]">
+                  {!analysisResult ? (
+                    <>
+                      <div className="text-[#a1a1aa] mb-3">
+                        <svg fill="none" height="36" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="36">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                          <path d="m9 12 2 2 4-4" />
+                        </svg>
+                      </div>
+                      <p className="text-xs">
+                        Submit a trade to receive<br />TradeGuardian decision.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="w-full flex flex-col items-center">
+                      <div
+                        className={`w-10 h-10 rounded-full border flex items-center justify-center mb-2 ${
+                          analysisResult.decision.status === 'APPROVED'
+                            ? 'bg-[#10b981]/10 border-[#10b981]/30 text-[#10b981]'
+                            : 'bg-red-500/10 border-red-500/30 text-red-400'
+                        }`}
+                      >
+                        {analysisResult.decision.status === 'APPROVED' ? (
+                          <svg fill="none" height="20" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="20">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        ) : (
+                          <svg fill="none" height="20" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" width="20">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="text-sm font-bold text-[#e4e4e7] uppercase tracking-wide">
+                        {analysisResult.decision.status === 'APPROVED' ? 'Order Approved' : 'Order Blocked'}
+                      </div>
+                      <div className="text-[11px] text-[#a1a1aa] mt-2 leading-relaxed text-center space-y-1">
+                        {analysisResult.decision.reasons.map((reason, i) => (
+                          <p key={i}>{reason}</p>
+                        ))}
+                      </div>
+
+                      {analysisResult.decision.status === 'APPROVED' && (
+                        <button
+                          type="button"
+                          className="mt-4 w-full py-2 bg-[#10b981] text-[#131315] rounded text-xs font-bold hover:bg-[#10b981]/90 transition-colors uppercase tracking-wider cursor-pointer"
+                        >
+                          Submit Paper Order
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </aside>
@@ -763,6 +756,4 @@ export const PrecisionInstitutionalTradingSystem: React.FC = () => {
       </div>
     </div>
   );
-};
-
-export default PrecisionInstitutionalTradingSystem;
+}
