@@ -8,6 +8,10 @@ from routes.market import router as market_router
 from routes.history import router as history_router
 from routes.assets import router as assets_router
 from routes.live import router as live_router
+from routes.agents import router as agents_router
+
+
+
 
 from core.database import initialize_database
 
@@ -40,6 +44,8 @@ app.include_router(market_router)
 app.include_router(history_router)
 app.include_router(assets_router)
 app.include_router(live_router)
+app.include_router(agents_router)
+
 
 @app.get("/")
 def root():

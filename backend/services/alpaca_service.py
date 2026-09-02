@@ -1,19 +1,29 @@
 import calendar
-
+from alpaca.data.enums import OptionsFeed
 from alpaca.trading.client import TradingClient
 from core.config import ALPACA_API_KEY, ALPACA_SECRET_KEY
 
 from alpaca.data.live.stock import StockDataStream
 from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockLatestTradeRequest
+from alpaca.data.historical.option import (
+    OptionHistoricalDataClient,
+)
+from alpaca.data.requests import (
+    OptionChainRequest,
+    OptionSnapshotRequest,
+    StockLatestTradeRequest,
+)
 from alpaca.data import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import (
     TimeFrame,
     TimeFrameUnit,
 )
-
+from alpaca.trading.enums import ContractType
+from alpaca.trading.requests import (
+    GetOptionContractsRequest,
+)
 from datetime import datetime, timedelta, timezone
 
 trading_client = TradingClient(
@@ -22,6 +32,10 @@ trading_client = TradingClient(
     paper=True,
 )
 stock_data_client = StockHistoricalDataClient(
+    ALPACA_API_KEY,
+    ALPACA_SECRET_KEY,
+)
+option_data_client = OptionHistoricalDataClient(
     ALPACA_API_KEY,
     ALPACA_SECRET_KEY,
 )
@@ -294,4 +308,191 @@ def subtract_months(
         year=year,
         month=month,
         day=day,
+    )
+def get_option_contracts(
+    symbol: str,
+    option_type: str,
+    min_days_to_expiration: int = 14,
+    max_days_to_expiration: int = 45,
+    strike_price_gte: float | None = None,
+    strike_price_lte: float | None = None,
+):
+    """
+    Retrieve active option contracts for an
+    underlying symbol.
+    """
+
+    symbol = symbol.upper()
+
+    today = datetime.now(
+        timezone.utc,
+    ).date()
+
+    expiration_date_gte = (
+        today
+        + timedelta(
+            days=min_days_to_expiration,
+        )
+    )
+
+    expiration_date_lte = (
+        today
+        + timedelta(
+            days=max_days_to_expiration,
+        )
+    )
+
+    if option_type.lower() == "call":
+
+        contract_type = ContractType.CALL
+
+    elif option_type.lower() == "put":
+
+        contract_type = ContractType.PUT
+
+    else:
+
+        raise ValueError(
+            "option_type must be "
+            "'call' or 'put'"
+        )
+
+    request = GetOptionContractsRequest(
+        underlying_symbols=[
+            symbol,
+        ],
+        expiration_date_gte=(
+            expiration_date_gte
+        ),
+        expiration_date_lte=(
+            expiration_date_lte
+        ),
+        strike_price_gte=(
+            str(strike_price_gte)
+            if strike_price_gte is not None
+            else None
+        ),
+        strike_price_lte=(
+            str(strike_price_lte)
+            if strike_price_lte is not None
+            else None
+        ),
+        type=contract_type,
+        limit=100,
+    )
+
+    response = (
+        trading_client.get_option_contracts(
+            request,
+        )
+    )
+
+    return response.option_contracts
+def get_option_snapshot(
+    option_symbol: str,
+):
+    """
+    Retrieve the latest market snapshot for
+    an option contract.
+    """
+
+    option_symbol = option_symbol.upper()
+
+    request = OptionSnapshotRequest(
+        symbol_or_symbols=option_symbol,
+        feed=OptionsFeed.INDICATIVE,
+    )
+
+    snapshots = (
+        option_data_client.get_option_snapshot(
+            request,
+        )
+    )
+
+    snapshot = snapshots.get(
+        option_symbol,
+    )
+
+    if snapshot is None:
+        raise ValueError(
+            f"No option market data found for "
+            f"{option_symbol}"
+        )
+
+    latest_quote = snapshot.latest_quote
+    latest_trade = snapshot.latest_trade
+
+    bid_price = (
+        float(latest_quote.bid_price)
+        if latest_quote is not None
+        else None
+    )
+
+    ask_price = (
+        float(latest_quote.ask_price)
+        if latest_quote is not None
+        else None
+    )
+
+    latest_trade_price = (
+        float(latest_trade.price)
+        if latest_trade is not None
+        else None
+    )
+
+    if (
+        bid_price is not None
+        and ask_price is not None
+        and bid_price > 0
+        and ask_price > 0
+    ):
+        estimated_premium = (
+            bid_price + ask_price
+        ) / 2
+
+    elif latest_trade_price is not None:
+        estimated_premium = (
+            latest_trade_price
+        )
+
+    else:
+        raise ValueError(
+            f"No usable option price found for "
+            f"{option_symbol}"
+        )
+
+    return {
+        "symbol": option_symbol,
+        "bid_price": bid_price,
+        "ask_price": ask_price,
+        "latest_trade_price": (
+            latest_trade_price
+        ),
+        "estimated_premium": round(
+            estimated_premium,
+            4,
+        ),
+        "implied_volatility": (
+            float(snapshot.implied_volatility)
+            if snapshot.implied_volatility
+            is not None
+            else None
+        ),
+    }
+
+def get_option_chain(
+    symbol: str,
+):
+    """
+    Retrieve option-chain snapshots with
+    currently available option market data.
+    """
+
+    request = OptionChainRequest(
+        underlying_symbol=symbol.upper(),
+        feed=OptionsFeed.INDICATIVE,
+    )
+
+    return option_data_client.get_option_chain(
+        request
     )

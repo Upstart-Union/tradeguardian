@@ -1,2134 +1,768 @@
-"use client";
+import React from 'react';
 
-import {
-  useEffect,
-  useState,
-} from "react";
-
-import MarketChart from "../components/MarketChart";
-
-type MarketBar = {
-  timestamp: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-};
-
-
-type MarketData = {
-  symbol: string;
-  latest_price: number;
-  bars: MarketBar[];
-};
-
-type Asset = {
-  symbol: string;
-  name: string;
-  exchange: string;
-  asset_class: string;
-  tradable: boolean;
-};
-
-type RiskCheckStatus =
-  "PASS" | "FAIL";
-
-type RiskCheckResult = {
-  status: RiskCheckStatus;
-  reason: string;
-};
-
-type AnalysisResult = {
-  audit_id: string;
-  timestamp: string;
-  message: string;
-
-  proposal: {
-    symbol: string;
-    side: string;
-    quantity: number;
-    current_price: number;
-    trade_value: number;
-  };
-
-  risk_metrics: {
-    existing_quantity: number;
-    projected_quantity: number;
-    account_equity: number;
-    buying_power: number;
-    trade_percent_of_equity: number;
-    existing_position_value: number;
-    projected_position_value: number;
-    projected_concentration_percent: number;
-  };
-
-  risk_checks: {
-    exposure: RiskCheckResult;
-    concentration: RiskCheckResult;
-    buying_power: RiskCheckResult;
-    position: RiskCheckResult;
-  };
-
-  decision: {
-    status: string;
-    reasons: string[];
-  };
-};
-
-export default function Home() {
-  const [symbol, setSymbol] = useState("AAPL");
-  const [side, setSide] = useState("buy");
-  const [quantity, setQuantity] = useState("10");
-
-  const [orderType, setOrderType] =
-    useState<"market" | "limit">("market");
-
-  const [entryPrice, setEntryPrice] =
-    useState("");
-
-  const [stopLoss, setStopLoss] =
-    useState("");
-
-  const [takeProfit, setTakeProfit] =
-    useState("");
-
-  const [timeframe, setTimeframe] =
-    useState("1M");
-
-  const [sidebarAccountOpen, setSidebarAccountOpen] =
-    useState(false);
-
-  const [paperAccountOpen, setPaperAccountOpen] =
-    useState(false);
-
-  const [marketMenuOpen, setMarketMenuOpen] =
-    useState(false);
-
-  const [marketSearch, setMarketSearch] =
-    useState("");
-
-  const [marketScrollTop, setMarketScrollTop] =
-    useState(0);
-
-  const [loadedMarketIndices, setLoadedMarketIndices] =
-    useState<Set<number>>(
-      () => new Set(),
-    );
-  const MARKET_ROW_HEIGHT = 46;
-  const MARKET_VISIBLE_ROWS = 6;
-
-  const [assets, setAssets] =
-    useState<Asset[]>([]);
-
-  const [assetsLoading, setAssetsLoading] =
-    useState(true);
-
-  const [marketData, setMarketData] =
-    useState<MarketData | null>(null);
-
-  const [marketLoading, setMarketLoading] =
-    useState(true);
-
-  const [analysisLoading, setAnalysisLoading] =
-    useState(false);
-
-  const [analysisResult, setAnalysisResult] =
-    useState<AnalysisResult | null>(null);
-
-  useEffect(() => {
-    async function loadAssets() {
-      try {
-        setAssetsLoading(true);
-
-        const response = await fetch(
-          "/api/assets",
-          {
-            cache: "no-store",
-          },
-        );
-
-        if (!response.ok) {
-          throw new Error(
-            "Failed to load assets",
-          );
-        }
-
-        const data: Asset[] =
-          await response.json();
-
-        setAssets(data);
-
-      } catch (error) {
-        console.error(
-          "Asset loading error:",
-          error,
-        );
-
-      } finally {
-        setAssetsLoading(false);
-      }
-    }
-
-    loadAssets();
-
-  }, []);
-
-  useEffect(() => {
-    async function loadMarketData() {
-      try {
-        setMarketLoading(true);
-
-        const response = await fetch(
-          `/api/market/${symbol}?timeframe=${timeframe}`,
-        );
-
-        if (!response.ok) {
-          throw new Error(
-            "Failed to load market data",
-          );
-        }
-
-        const data = await response.json();
-
-        setMarketData(data);
-
-      } catch (error) {
-        console.error(
-          "Market data error:",
-          error,
-        );
-
-        alert(
-          `Market data failed: ${
-            error instanceof Error
-              ? error.message
-              : String(error)
-          }`,
-        );
-
-      } finally {
-        setMarketLoading(false);
-      }
-    }
-
-
-    loadMarketData();
-
-  }, [symbol, timeframe]);
-
-  async function analyzeTrade() {
-    const parsedQuantity = Number(quantity);
-
-    if (
-      !Number.isFinite(parsedQuantity) ||
-      parsedQuantity <= 0
-    ) {
-      alert(
-        "Please enter a valid quantity.",
-      );
-
-      return;
-    }
-    try {
-      setAnalysisLoading(true);
-
-      const response = await fetch(
-        "/api/analyze",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type": "application/json",
-          },
-
-          body: JSON.stringify({
-            symbol,
-            side,
-            quantity: parsedQuantity,
-            order_type: orderType,
-            entry_price:
-              entryPrice.trim() === ""
-                ? null
-                : Number(entryPrice),
-            stop_loss:
-              stopLoss.trim() === ""
-                ? null
-                : Number(stopLoss),
-            take_profit:
-              takeProfit.trim() === ""
-                ? null
-                : Number(takeProfit),
-          }),
-        },
-      );
-
-      const data = await response.json();
-
-      console.log(
-        "Analysis response:",
-        data,
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail ??
-          "Failed to analyze trade",
-        );
-      }
-
-      setAnalysisResult(data);
-
-    } catch (error) {
-      console.error(
-        "Trade analysis error:",
-        error,
-      );
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : String(error),
-      );
-
-    } finally {
-      setAnalysisLoading(false);
-    }
-  }
-
-  const filteredAssets =
-    assets.filter((asset) => {
-      const query =
-        marketSearch.trim().toLowerCase();
-
-      if (!query) {
-        return true;
-      }
-
-      return (
-        asset.symbol
-          .toLowerCase()
-          .includes(query) ||
-        asset.name
-          .toLowerCase()
-          .includes(query)
-      );
-    });
-
-  const marketStartIndex =
-    Math.floor(
-      marketScrollTop /
-        MARKET_ROW_HEIGHT,
-    );
-
-  const marketEndIndex =
-    Math.min(
-      filteredAssets.length,
-      marketStartIndex +
-        MARKET_VISIBLE_ROWS +
-        2,
-    );
-
-  const virtualAssets =
-    filteredAssets.slice(
-      marketStartIndex,
-      marketEndIndex,
-    );
-
-  const topSpacerHeight =
-    marketStartIndex *
-    MARKET_ROW_HEIGHT;
-
-  const bottomSpacerHeight =
-    Math.max(
-      0,
-      (
-        filteredAssets.length -
-        marketEndIndex
-      ) *
-        MARKET_ROW_HEIGHT,
-    );
-
-  useEffect(() => {
-    if (!marketMenuOpen) {
-      return;
-    }
-
-    const visibleIndices =
-      virtualAssets.map(
-        (_, index) =>
-          marketStartIndex + index,
-      );
-
-    const timer = window.setTimeout(() => {
-      setLoadedMarketIndices(
-        (previous) => {
-          const next = new Set(previous);
-
-          visibleIndices.forEach(
-            (index) => {
-              next.add(index);
-            },
-          );
-
-          return next;
-        },
-      );
-    }, 180);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [
-    marketMenuOpen,
-    marketStartIndex,
-    virtualAssets.length,
-  ]);
-
-  const currentMarketPrice =
-    marketData?.latest_price ??
-    analysisResult?.proposal.current_price ??
-    0;
-
-  const parsedStopLoss =
-    stopLoss.trim() === ""
-      ? null
-      : Number(stopLoss);
-
-  const parsedTakeProfit =
-    takeProfit.trim() === ""
-      ? null
-      : Number(takeProfit);
-
-  const effectiveEntryPrice =
-    orderType === "market"
-      ? currentMarketPrice
-      : Number(entryPrice);
-
-  const hasValidEntryPrice =
-    Number.isFinite(effectiveEntryPrice) &&
-    effectiveEntryPrice > 0;
-
-  const riskAmount =
-    hasValidEntryPrice &&
-    parsedStopLoss !== null
-      ? Math.abs(
-          effectiveEntryPrice -
-          parsedStopLoss,
-        )
-      : null;
-
-  const rewardAmount =
-    hasValidEntryPrice &&
-    parsedTakeProfit !== null
-      ? Math.abs(
-          parsedTakeProfit -
-          effectiveEntryPrice,
-        )
-      : null;
-
-  const riskRewardRatio =
-    riskAmount &&
-    riskAmount > 0 &&
-    rewardAmount !== null
-      ? rewardAmount / riskAmount
-      : null;
-
-  const stopLossValid =
-    parsedStopLoss === null
-      ? null
-      : side === "buy"
-        ? parsedStopLoss < effectiveEntryPrice
-        : parsedStopLoss > effectiveEntryPrice;
-
-  const stopLossPercent =
-    parsedStopLoss !== null &&
-    effectiveEntryPrice > 0
-      ? (
-          ((parsedStopLoss -
-            effectiveEntryPrice) /
-            effectiveEntryPrice) *
-          100
-        )
-      : null;
-
-  const takeProfitPercent =
-    parsedTakeProfit !== null &&
-    effectiveEntryPrice > 0
-      ? (
-          ((parsedTakeProfit -
-            effectiveEntryPrice) /
-            effectiveEntryPrice) *
-          100
-        )
-      : null;
-
-  const guardianRisk = (() => {
-    if (!analysisResult) {
-      return null;
-    }
-
-    let score = 0;
-
-    // Backend risk check failures
-    const backendChecks = [
-      analysisResult.risk_checks.exposure,
-      analysisResult.risk_checks.position,
-      analysisResult.risk_checks.concentration,
-      analysisResult.risk_checks.buying_power,
-    ];
-
-    const failedChecks =
-      backendChecks.filter(
-        (check) => check.status === "FAIL",
-      ).length;
-
-    score += failedChecks * 25;
-
-
-    // Stop loss protection
-    if (parsedStopLoss === null) {
-      score += 30;
-    } else if (!stopLossValid) {
-      score += 50;
-    }
-
-
-    // Risk / reward
-    if (
-      riskRewardRatio !== null &&
-      riskRewardRatio < 1
-    ) {
-      score += 15;
-    } else if (
-      riskRewardRatio !== null &&
-      riskRewardRatio < 1.5
-    ) {
-      score += 8;
-    }
-
-
-    score = Math.min(
-      100,
-      Math.round(score),
-    );
-
-
-    const level =
-      score <= 25
-        ? "LOW RISK"
-        : score <= 60
-          ? "MODERATE RISK"
-          : "HIGH RISK";
-
-
-    const status =
-      score <= 25
-        ? "APPROVED"
-        : score <= 60
-          ? "FLAGGED"
-          : "BLOCKED";
-
-
-    return {
-      score,
-      level,
-      status,
-    };
-  })();
-
+export const PrecisionInstitutionalTradingSystem: React.FC = () => {
   return (
-    <main className="min-h-screen bg-[#171717] text-[#e5e5e5]">
-      <div className="flex min-h-screen">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#131315] text-[#e4e4e7] font-sans antialiased">
+      {/* Embedded fonts and custom scrollbar styles to ensure identical rendering */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
-        {/* LEFT SIDEBAR */}
-        <aside className="flex h-screen w-[256px] shrink-0 flex-col border-r border-[#272b31] bg-[#0c0e10]">
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #131315;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #27272a;
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #3f3f46;
+        }
+      `}</style>
 
-          {/* Brand */}
-          <div className="flex h-[110px] items-center border-b border-[#272b31] px-6">
-
+      <div className="flex flex-1 overflow-hidden h-full">
+        {/* BEGIN: Sidebar */}
+        <aside
+          className="w-64 border-r border-[#2b2a2c] bg-[#131315] flex flex-col shrink-0 custom-scrollbar h-full"
+          style={{ width: '256px' }}
+        >
+          <div className="p-4 flex items-center justify-between border-b border-[#2b2a2c]/50">
             <div className="flex items-center gap-3">
-
-              {/* Alpaca Mark */}
-              <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center">
-                <img
-                  src="/alpaca-symbol.png"
-                  alt="Alpaca"
-                  className="h-[44px] w-[44px] object-contain"
-                />
+              <img
+                src="https://lh3.googleusercontent.com/aida-public/AB6AXuBaJuoD2zc70ThZz24wu4V2g-CLlJn-zsbDIwcryDpqKYmntpN7nEy_j8URp21iJYwlAiQX33qaquMQ2GeNKJBTB9DDIoMOkkTtuuDTxOHEejpMvsj0FirC-Hgp61O-ZiquIStJx9O2mecX6HfP9vCiitpRe_WW3DhStgcJHMJDcFW4nime8CM2Q6MUFN95xaOJoXqkPjY5Tv4gTIqHmzyqDQO64J7GpubjiAZ9VgMHA0awrxyzgBEFW54ngltlYMbTEw"
+                alt="Alpaca Logo"
+                className="w-8 h-8 object-contain rounded-full"
+              />
+              <div>
+                <div className="font-bold text-[#e4e4e7]">Alpaca</div>
+                <div className="text-[10px] text-[#a1a1aa]">TradeGuardian AI</div>
               </div>
-
-              <div className="min-w-0">
-
-                <h1 className="whitespace-nowrap text-[20px] font-semibold tracking-tight text-[#e7e7e7]">
-                  Alpaca
-                </h1>
-
-                <p className="mt-1 whitespace-nowrap text-[14px] text-[#9ca0a8]">
-                  TradeGuardian AI
-                </p>
-
-              </div>
-
             </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                setSidebarAccountOpen(
-                  !sidebarAccountOpen,
-                )
-              }
-              className="ml-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#c7c7c7] transition hover:bg-[#1b1d20] hover:text-white"
-              aria-label="Change account"
+            <svg
+              className="text-[#a1a1aa]"
+              fill="none"
+              height="16"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+              width="16"
+              xmlns="http://www.w3.org/2000/svg"
             >
-              <svg
-                className={`h-4 w-4 transition-transform ${
-                  sidebarAccountOpen
-                    ? "rotate-180"
-                    : ""
-                }`}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </button>
-
+              <path d="m6 9 6 6 6-6" />
+            </svg>
           </div>
 
-          {/* Navigation */}
-          <nav className="px-3 py-4">
+          <nav className="flex-1 py-4 overflow-y-auto custom-scrollbar">
+            <ul className="space-y-1">
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 rounded-md text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] transition-colors"
+                  href="#"
+                >
+                  <svg
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <rect height="9" rx="1" width="7" x="3" y="3" />
+                    <rect height="5" rx="1" width="7" x="14" y="3" />
+                    <rect height="9" rx="1" width="7" x="14" y="12" />
+                    <rect height="5" rx="1" width="7" x="3" y="16" />
+                  </svg>
+                  <span className="font-medium text-sm">Dashboard</span>
+                </a>
+              </li>
 
-            <button className="flex h-[50px] w-full items-center gap-4 border-l-2 border-[#ffd31a] bg-[#17191d] px-4 text-left text-[16px] font-medium text-[#ffd84d]">
-              <svg
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              >
-                <rect x="4" y="4" width="6" height="6" rx="1" />
-                <rect x="14" y="4" width="6" height="6" rx="1" />
-                <rect x="4" y="14" width="6" height="6" rx="1" />
-                <path d="M14 17h6" />
-                <path d="M17 14v6" />
-              </svg>
-              <span>Dashboard</span>
-            </button>
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 bg-[#facc15]/10 rounded-md border-l-2 border-[#facc15] text-[#facc15]"
+                  href="#"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>
+                    query_stats
+                  </span>
+                  <span className="font-medium text-sm">Trade Analysis</span>
+                </a>
+              </li>
 
-            <button className="mt-1 flex h-[52px] w-full items-center gap-4 px-4 text-left text-[16px] text-[#c6c8ce] transition hover:bg-[#17191d]">
-              <svg
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              >
-                <circle cx="12" cy="12" r="8" />
-                <circle cx="12" cy="12" r="2.5" />
-              </svg>
-              <span>Positions</span>
-            </button>
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
+                  href="#"
+                >
+                  <svg
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  <span className="font-medium text-sm">Activity Log</span>
+                </a>
+              </li>
 
-            <button className="mt-1 flex h-[52px] w-full items-center gap-4 px-4 text-left text-[16px] text-[#c6c8ce] transition hover:bg-[#17191d]">
-              <svg
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              >
-                <path d="M5 7h3" />
-                <path d="M11 7h8" />
-                <path d="M5 12h3" />
-                <path d="M11 12h8" />
-                <path d="M5 17h3" />
-                <path d="M11 17h8" />
-                <circle cx="4" cy="7" r="1" fill="currentColor" stroke="none" />
-                <circle cx="4" cy="12" r="1" fill="currentColor" stroke="none" />
-                <circle cx="4" cy="17" r="1" fill="currentColor" stroke="none" />
-              </svg>
-              <span>Orders</span>
-            </button>
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
+                  href="#"
+                >
+                  <svg
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                  </svg>
+                  <span className="font-medium text-sm">AI Opportunities</span>
+                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded border bg-purple-500/10 border-purple-500/30 text-purple-400">
+                    NEW
+                  </span>
+                </a>
+              </li>
 
-            <button className="mt-1 flex h-[52px] w-full items-center gap-4 px-4 text-left text-[16px] text-[#c6c8ce] transition hover:bg-[#17191d]">
-              <svg
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M4 19V5" />
-                <path d="M4 19h16" />
-                <path d="M7 15l4-4 3 2 5-6" />
-              </svg>
-              <span>Performance</span>
-            </button>
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
+                  href="#"
+                >
+                  <svg
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <span className="font-medium text-sm">Settings</span>
+                </a>
+              </li>
 
-            <button className="mt-1 flex h-[52px] w-full items-center gap-4 px-4 text-left text-[16px] text-[#c6c8ce] transition hover:bg-[#17191d]">
-              <svg
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              >
-                <circle cx="12" cy="12" r="8" />
-                <path d="M12 8v4l3 2" />
-              </svg>
-              <span>Activity Log</span>
-            </button>
+              <li className="my-4 border-t border-[#2b2a2c]/50 mx-4" />
 
-            <button className="mt-1 flex h-[52px] w-full items-center gap-4 px-4 text-left text-[16px] text-[#c6c8ce] transition hover:bg-[#17191d]">
-              <svg
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5v.1h-2.6v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1A1.7 1.7 0 0 0 8 15a1.7 1.7 0 0 0-1.5-1H6.4v-2.6h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.8-1.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5v-.1H15v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1V14h-.1a1.7 1.7 0 0 0-1.5 1Z" />
-              </svg>
-              <span>Settings</span>
-            </button>
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
+                  href="#"
+                >
+                  <svg
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path d="M3 3v18h18" />
+                    <path d="M18 17V9" />
+                    <path d="M13 17V5" />
+                    <path d="M8 17v-3" />
+                  </svg>
+                  <span className="font-medium text-sm">Analysis History</span>
+                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500 text-red-500">
+                    UNAVAILABLE
+                  </span>
+                </a>
+              </li>
 
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
+                  href="#"
+                >
+                  <svg
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <circle cx="12" cy="12" r="4" />
+                  </svg>
+                  <span className="font-medium text-sm">Positions</span>
+                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500 text-red-500">
+                    UNAVAILABLE
+                  </span>
+                </a>
+              </li>
+
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
+                  href="#"
+                >
+                  <svg
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <line x1="8" x2="21" y1="6" y2="6" />
+                    <line x1="8" x2="21" y1="12" y2="12" />
+                    <line x1="8" x2="21" y1="18" y2="18" />
+                    <line x1="3" x2="3.01" y1="6" y2="6" />
+                    <line x1="3" x2="3.01" y1="12" y2="12" />
+                    <line x1="3" x2="3.01" y1="18" y2="18" />
+                  </svg>
+                  <span className="font-medium text-sm">Orders</span>
+                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500 text-red-500">
+                    UNAVAILABLE
+                  </span>
+                </a>
+              </li>
+
+              <li className="px-3">
+                <a
+                  className="flex items-center gap-3 px-3 py-2 text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-[#1c1b1d] rounded-md transition-colors"
+                  href="#"
+                >
+                  <svg
+                    fill="none"
+                    height="18"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path d="M3 3v18h18" />
+                    <path d="m19 9-5 5-4-4-3 3" />
+                  </svg>
+                  <span className="font-medium text-sm">Performance</span>
+                  <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500 text-red-500">
+                    UNAVAILABLE
+                  </span>
+                </a>
+              </li>
+
+              <li className="my-4 border-t border-[#2b2a2c]/50 mx-4" />
+            </ul>
+
+            <div className="px-6 py-4">
+              <h3 className="text-[10px] font-bold text-[#a1a1aa] mb-4 uppercase tracking-widest">
+                ACCOUNT
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <div className="text-xs text-[#a1a1aa] mb-1">Total Equity</div>
+                  <div className="text-xl font-bold font-sans text-[#e4e4e7]">$100,000.00</div>
+                </div>
+                <div>
+                  <div className="text-xs text-[#a1a1aa] mb-1">Buying Power</div>
+                  <div className="text-xl font-bold font-sans text-[#e4e4e7]">$400,000.00</div>
+                </div>
+                <div>
+                  <div className="text-xs text-[#a1a1aa] mb-1">Open Positions</div>
+                  <div className="text-[15px] font-bold font-sans text-[#e4e4e7]">0</div>
+                </div>
+              </div>
+            </div>
           </nav>
 
-
-          {/* Account */}
-          <div className="mx-5 border-t border-[#2a2d32] pt-8">
-
-            <p className="text-[13px] font-medium uppercase tracking-wide text-[#a7aab1]">
-              Account
-            </p>
-
-            <div className="mt-5 space-y-6">
-
-              <AccountMetric
-                label="Total Equity"
-                value="$100,000.00"
-              />
-
-              <AccountMetric
-                label="Buying Power"
-                value="$400,000.00"
-              />
-
-              <AccountMetric
-                label="Open Positions"
-                value="0"
-              />
-
-            </div>
-
-          </div>
-
-
-          {/* Sidebar Bottom */}
-          <div className="mt-auto border-t border-[#2a2d32] p-5">
-
-            <button className="flex h-[54px] w-full items-center justify-between rounded-md border border-[#30343a] bg-[#121417] px-4 text-[15px] text-[#c7c9cf] transition hover:border-[#454a52] hover:bg-[#17191d]">
-
-              <span>Analysis History</span>
-
-              <span className="text-xl">
-                →
-              </span>
-
-            </button>
-
-          </div>
-
-        </aside>
-
-
-        {/* MAIN APPLICATION */}
-        <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
-
-          {/* TOP BAR */}
-          <header className="flex h-[110px] shrink-0 items-center justify-between border-b border-[#272b31] bg-[#0c0e10] px-12">
-
-            {/* Workspace Title */}
-            <div>
-
-              <p className="text-[13px] font-medium tracking-wide text-[#ffd84d]">
-                WORKSPACE
-              </p>
-
-              <h2 className="mt-2 text-[28px] font-semibold tracking-tight text-[#e5e7eb]">
-                Trade Analysis
-              </h2>
-
-            </div>
-
-
-            {/* Account Controls */}
-            <div className="flex items-center gap-10">
-
-              {/* Connection Status */}
-              <div className="flex min-w-0 flex-1 items-center gap-3">
-
-                <span className="h-2.5 w-2.5 rounded-full bg-[#20b26b]" />
-
-                <span className="text-[15px] text-[#9fa3aa]">
-                  Market Data Connected
-                </span>
-
-              </div>
-
-
-              {/* Paper Account */}
-              <button
-                type="button"
-                onClick={() =>
-                  setPaperAccountOpen(
-                    !paperAccountOpen,
-                  )
-                }
-                className="flex h-[48px] items-center gap-7 rounded-md border border-[#e1b900] bg-[#111316] px-5 text-[15px] font-medium text-[#f0cd48] transition hover:bg-[#1b1d20] hover:text-[#ffe26a]"
-                aria-label="Change trading account"
-              >
-                <span>
-                  Paper Account
-                </span>
-
+          <div className="p-4 border-t border-[#2b2a2c] mt-auto">
+            <button className="flex items-center justify-between w-full px-2 py-2 text-sm text-[#a1a1aa] hover:text-[#e4e4e7] rounded transition-colors">
+              <div className="flex items-center gap-3 px-2">
                 <svg
-                  className={`h-4 w-4 transition-transform ${
-                    paperAccountOpen
-                      ? "rotate-180"
-                      : ""
-                  }`}
-                  viewBox="0 0 24 24"
                   fill="none"
+                  height="16"
                   stroke="currentColor"
-                  strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                  width="16"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+                <span className="font-medium">Collapse</span>
+              </div>
+            </button>
+          </div>
+        </aside>
+        {/* END: Sidebar */}
+
+        {/* BEGIN: Main Content Area */}
+        <div className="flex-1 flex flex-col h-full bg-[#131315]">
+          {/* BEGIN: MainHeader */}
+          <header className="h-16 flex items-center justify-between px-6 border-b border-[#2b2a2c] shrink-0 bg-[#131315]">
+            <div className="flex items-center gap-6">
+              <h1 className="text-lg font-bold text-[#e4e4e7]">Trade Analysis</h1>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2 text-xs text-[#a1a1aa]">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#10b981]" />
+                Market Data Connected
+              </div>
+              <button className="flex items-center gap-2 px-3 py-1.5 border border-[#facc15] text-[#facc15] rounded text-xs font-medium hover:bg-[#facc15]/10 transition-colors">
+                Paper Account
+                <svg
+                  fill="none"
+                  height="14"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                  width="14"
+                  xmlns="http://www.w3.org/2000/svg"
                 >
                   <path d="m6 9 6 6 6-6" />
                 </svg>
               </button>
-
             </div>
-
           </header>
+          {/* END: MainHeader */}
 
-
-          {/* ANALYSIS WORKSPACE */}
-          <section className="flex min-h-0 flex-1 overflow-visible">
-
-            <div className="flex min-h-0 flex-1 flex-col overflow-visible px-7 py-3">
-
-              {/* MARKET + VERIFICATION */}
-              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_280px] gap-4">
-
-                {/* LEFT: MARKET */}
-                <div className="col-start-1 row-start-1 flex min-h-0 flex-col overflow-hidden rounded-md border border-[#272b31] bg-[#101010]">
-
-                  {/* Market Header */}
-                  <div className="flex items-start justify-between px-6 pt-7">
-
-                    {/* Symbol + Price */}
-                    <div>
-
-                      <h3 className="text-[30px] font-semibold tracking-tight text-[#e5e7eb]">
-                        {marketData?.symbol ?? symbol}
-                      </h3>
-
-                      <div className="mt-2 flex items-baseline gap-4">
-
-                        <span className="text-[26px] font-medium text-[#e5e7eb]">
-                          {marketData
-                            ? `$${marketData.latest_price.toFixed(2)}`
-                            : "--"}
-                        </span>
-
-                        <span className="text-[15px] font-medium text-[#38c980]">
-                          +2.34 (0.73%)
-                        </span>
-
-                      </div>
-
+          <div className="flex-1 flex overflow-hidden">
+            <main className="flex flex-col min-w-0 overflow-y-auto custom-scrollbar flex-1 pr-4 pt-6 pl-6 pb-6">
+              {/* Chart Panel */}
+              <div className="bg-[#131315] border border-[#2b2a2c] rounded-lg p-6 flex flex-col shrink-0 flex-1 mb-4">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h2 className="text-2xl font-bold flex items-center gap-2">AAPL</h2>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-xl font-bold">$321.25</span>
+                      <span className="text-sm font-medium text-[#10b981]">+2.34 (0.73%)</span>
                     </div>
-
-
-                    {/* Timeframe Controls */}
-                    <div className="flex items-center gap-3">
-
-                      <div className="flex overflow-hidden rounded-md border border-[#292929] bg-[#111111]">
-
-                        {["1D", "5D", "1M", "3M", "1Y"].map(
-                          (period) => (
-                            <button
-                              key={period}
-                              type="button"
-                              onClick={() =>
-                                setTimeframe(period)
-                              }
-                              className={`px-5 py-3 text-[15px] transition ${
-                                timeframe === period
-                                  ? "bg-[#151515] font-medium text-[#f1d14b]"
-                                  : "text-[#9ca1aa] hover:bg-[#151515] hover:text-[#d5d5d5]"
-                              }`}
-                            >
-                              {period}
-                            </button>
-                          ),
-                        )}
-
-                      </div>
-
-
-                      {/* Chart Settings */}
-                      <button className="flex h-[50px] w-[50px] items-center justify-center rounded-md border border-[#292929] bg-[#111111] text-lg text-[#b6bbc4] transition hover:bg-[#151515] hover:text-[#d5d5d5]">
-                        ⚙
-                      </button>
-
-                    </div>
-
                   </div>
-
-
-                  {/* Chart */}
-                  <div className="mt-5 min-h-0 flex-1 px-6 pb-5">
-
-                    {marketLoading ? (
-
-                      <div className="flex h-full items-center justify-center">
-                        <span className="font-mono text-xs tracking-[0.12em] text-[#667085]">
-                          LOADING MARKET DATA
-                        </span>
-                      </div>
-
-                    ) : marketData ? (
-
-                      <div className="h-full">
-                        <MarketChart
-                          bars={marketData.bars}
-                          timeframe={timeframe}
-                          symbol={symbol}
-                        />
-                      </div>
-
-                    ) : (
-
-                      <div className="flex h-full items-center justify-center">
-                        <span className="font-mono text-xs tracking-[0.12em] text-[#667085]">
-                          MARKET DATA UNAVAILABLE
-                        </span>
-                      </div>
-
-                    )}
-
+                  <div className="flex items-center gap-1 bg-[#0e0e10] border border-[#2b2a2c] rounded p-1">
+                    <button className="px-3 py-1 text-xs font-medium text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
+                      1D
+                    </button>
+                    <button className="px-3 py-1 text-xs font-medium text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
+                      5D
+                    </button>
+                    <button className="px-3 py-1 text-xs font-bold text-[#131315] bg-[#facc15] rounded">
+                      1M
+                    </button>
+                    <button className="px-3 py-1 text-xs font-medium text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
+                      3M
+                    </button>
+                    <button className="px-3 py-1 text-xs font-medium text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
+                      1Y
+                    </button>
+                    <div className="w-px h-4 bg-[#2b2a2c] mx-1" />
+                    <button className="p-1 text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
+                      <svg
+                        fill="none"
+                        height="14"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        viewBox="0 0 24 24"
+                        width="14"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    </button>
                   </div>
-
                 </div>
-
-                {/* TRADE COMMAND BAR */}
-                <section className="relative z-30 col-start-1 row-start-2 flex min-h-0 flex-col overflow-visible rounded-md border border-[#2d2d2d] bg-[#111111] px-5 py-3">
-
-                  <div className="w-full shrink-0">
-
-                    {/* Main Trade Controls */}
-                    <div className="grid grid-cols-3 gap-x-5 gap-y-2">
-
-                      {/* Symbol */}
-                      <div className="relative z-50">
-
-                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
-                          SYMBOL
-                        </label>
-
-                        <div className="relative">
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const nextOpen = !marketMenuOpen;
-
-                              setMarketMenuOpen(nextOpen);
-
-                              if (nextOpen) {
-                                setMarketSearch("");
-                                setMarketScrollTop(0);
-                                setLoadedMarketIndices(new Set());
-                              }
-                            }}
-                            className="flex h-[48px] w-full items-center rounded-md border border-[#353535] bg-[#171717] px-4 text-left text-white transition hover:border-[#4a4a4a] hover:bg-[#1b1b1b]"
-                            aria-haspopup="listbox"
-                            aria-expanded={marketMenuOpen}
-                          >
-
-                            <img
-                              src={`https://img.logo.dev/ticker/${symbol}?token=${process.env.NEXT_PUBLIC_LOGO_DEV_TOKEN}`}
-                              alt=""
-                              className="h-5 w-5 shrink-0 rounded-full object-contain"
-                              onError={(event) => {
-                                event.currentTarget.style.display = "none";
-                              }}
-                            />
-
-                            <span className="ml-3 text-[15px] font-medium">
-                              {symbol}
-                            </span>
-
-                            <svg
-                              className={`ml-auto h-4 w-4 text-[#a5a5a5] transition-transform ${
-                                marketMenuOpen
-                                  ? "rotate-180"
-                                  : ""
-                              }`}
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <path d="m6 9 6 6 6-6" />
-                            </svg>
-
-                          </button>
-
-
-                          {/* Keep your existing Market Dropdown here */}
-                          {marketMenuOpen && (
-                            <div
-                              className="absolute bottom-full left-0 right-0 z-50 mb-2 overflow-hidden rounded-md border border-[#353535] bg-[#171717] shadow-xl"
-                              role="listbox"
-                            >
-
-                              <div className="border-b border-[#303030] p-3">
-                                <div className="relative">
-
-                                  <input
-                                    type="text"
-                                    value={marketSearch}
-                                    onChange={(event) => {
-                                      const value =
-                                        event.target.value;
-
-                                      setMarketSearch(value);
-                                      setMarketScrollTop(0);
-                                      setLoadedMarketIndices(
-                                        new Set(),
-                                      );
-                                    }}
-                                    placeholder="Search markets..."
-                                    className="h-10 w-full rounded-md border border-[#353535] bg-[#121212] px-3 text-[13px] text-white outline-none placeholder:text-[#666666]"
-                                  />
-
-                                </div>
-                              </div>
-
-                              <div
-                                className="h-[276px] overflow-y-auto market-scroll"
-                                onScroll={(event) => {
-                                  setMarketScrollTop(
-                                    event.currentTarget.scrollTop,
-                                  );
-                                }}
-                              >
-
-                                {assetsLoading ? (
-
-                                  <div className="space-y-1 p-2">
-
-                                    {Array.from(
-                                      { length: 6 },
-                                      (_, index) => (
-                                        <div
-                                          key={index}
-                                          className="flex h-[46px] items-center gap-3 px-2"
-                                        >
-
-                                          <div className="h-7 w-7 animate-pulse rounded-full bg-[#252525]" />
-
-                                          <div className="flex-1 space-y-2">
-
-                                            <div className="h-3 w-16 animate-pulse rounded bg-[#252525]" />
-
-                                            <div className="h-2 w-28 animate-pulse rounded bg-[#202020]" />
-
-                                          </div>
-
-                                        </div>
-                                      ),
-                                    )}
-
-                                  </div>
-
-                                ) : filteredAssets.length === 0 ? (
-
-                                  <div className="flex h-[120px] items-center justify-center">
-
-                                    <span className="text-[13px] text-[#777777]">
-                                      No markets found
-                                    </span>
-
-                                  </div>
-
-                                ) : (
-
-                                  <>
-                                    <div
-                                      style={{
-                                        height: topSpacerHeight,
-                                      }}
-                                    />
-
-                                    {virtualAssets.map(
-                                      (asset, assetIndex) => {
-                                        const realIndex =
-                                          marketStartIndex + assetIndex;
-
-                                        const isLoaded =
-                                          loadedMarketIndices.has(
-                                            realIndex,
-                                          );
-
-                                        return (
-                                          <button
-                                            key={`${asset.symbol}-${realIndex}`}
-                                            type="button"
-                                            onClick={() => {
-                                              setSymbol(asset.symbol);
-                                              setMarketMenuOpen(false);
-                                              setMarketSearch("");
-                                              setMarketScrollTop(0);
-                                              setLoadedMarketIndices(
-                                                new Set(),
-                                              );
-                                            }}
-                                            className={`flex h-[46px] w-full items-center gap-3 px-4 text-left ${
-                                              symbol === asset.symbol
-                                                ? "bg-[#1f1f1f]"
-                                                : "hover:bg-[#1d1d1d]"
-                                            }`}
-                                          >
-                                            {!isLoaded ? (
-                                              <div className="flex w-full items-center gap-3">
-                                                <div className="h-7 w-7 shrink-0 animate-pulse rounded-full bg-[#252525]" />
-
-                                                <div className="flex-1 space-y-2">
-                                                  <div className="h-3 w-16 animate-pulse rounded bg-[#252525]" />
-
-                                                  <div className="h-2 w-28 animate-pulse rounded bg-[#202020]" />
-                                                </div>
-                                              </div>
-                                            ) : (
-                                              <>
-                                                <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#222222]">
-                                                  <img
-                                                    src={`https://img.logo.dev/ticker/${asset.symbol}?token=${process.env.NEXT_PUBLIC_LOGO_DEV_TOKEN}`}
-                                                    alt=""
-                                                    className="h-full w-full object-contain"
-                                                    onError={(event) => {
-                                                      event.currentTarget.style.display =
-                                                        "none";
-                                                    }}
-                                                  />
-                                                </div>
-
-                                                <div className="min-w-0">
-                                                  <p className="truncate text-[14px] font-medium text-[#d5d5d5]">
-                                                    {asset.symbol}
-                                                  </p>
-
-                                                  <p className="truncate text-[11px] text-[#777777]">
-                                                    {asset.name}
-                                                  </p>
-                                                </div>
-                                              </>
-                                            )}
-                                          </button>
-                                        );
-                                      },
-                                    )}
-
-                                    <div
-                                      style={{
-                                        height: bottomSpacerHeight,
-                                      }}
-                                    />
-                                  </>
-
-                                )}
-
-                              </div>
-
-                            </div>
-                          )}
-
-                        </div>
-
-                      </div>
-
-
-                      {/* Side */}
-                      <div>
-
-                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
-                          SIDE
-                        </label>
-
-                        <div className="flex h-[48px] overflow-hidden rounded-md border border-[#353535] bg-[#171717]">
-
-                          <button
-                            type="button"
-                            onClick={() => setSide("buy")}
-                            className={`flex-1 text-[14px] font-medium transition ${
-                              side === "buy"
-                                ? "bg-[#1d1d1d] text-[#22c77a]"
-                                : "text-[#a5a5a5]"
-                            }`}
-                          >
-                            BUY
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setSide("sell")}
-                            className={`flex-1 border-l border-[#353535] text-[14px] font-medium transition ${
-                              side === "sell"
-                                ? "bg-[#1d1d1d] text-[#ef5350]"
-                                : "text-[#a5a5a5]"
-                            }`}
-                          >
-                            SELL
-                          </button>
-
-                        </div>
-
-                      </div>
-
-
-                      {/* Quantity */}
-                      <div>
-
-                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
-                          QUANTITY
-                        </label>
-
-                        <input
-                          type="number"
-                          min="1"
-                          value={quantity}
-                          onChange={(event) =>
-                            setQuantity(event.target.value)
-                          }
-                          className="h-[48px] w-full rounded-md border border-[#353535] bg-[#171717] px-4 text-[15px] font-medium text-white outline-none transition focus:border-[#5a5a5a]"
-                        />
-
-                      </div>
-
-                      {/* Entry Price */}
-                      <div>
-
-                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
-                          ENTRY PRICE
-                        </label>
-
-                        <div className="flex h-[48px] overflow-hidden rounded-md border border-[#353535] bg-[#171717]">
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setOrderType("market")
-                            }
-                            className={`px-4 text-[13px] font-medium ${
-                              orderType === "market"
-                                ? "bg-[#1d1d1d] text-[#f0d04f]"
-                                : "text-[#8d939b]"
-                            }`}
-                          >
-                            Market
-                          </button>
-
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setOrderType("limit")
-                            }
-                            className={`border-l border-[#353535] px-4 text-[13px] font-medium ${
-                              orderType === "limit"
-                                ? "bg-[#1d1d1d] text-[#f0d04f]"
-                                : "text-[#8d939b]"
-                            }`}
-                          >
-                            Limit
-                          </button>
-
-
-                          <input
-                            type="number"
-                            step="0.01"
-                            disabled={orderType === "market"}
-                            value={
-                              orderType === "market"
-                                ? currentMarketPrice.toFixed(2)
-                                : entryPrice
-                            }
-                            onChange={(event) =>
-                              setEntryPrice(event.target.value)
-                            }
-                            placeholder="0.00"
-                            className="min-w-0 flex-1 border-l border-[#353535] bg-[#171717] px-3 text-[13px] text-white outline-none disabled:text-[#a7abb2]"
-                          />
-
-                        </div>
-
-
-                        <p className="mt-2 text-[11px] text-[#777d87]">
-                          Current Market Price
-                        </p>
-
-                      </div>
-
-
-                      {/* Stop Loss */}
-                      <div>
-
-                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
-                          STOP LOSS
-                        </label>
-
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={stopLoss}
-                          onChange={(event) =>
-                            setStopLoss(event.target.value)
-                          }
-                          placeholder="Optional"
-                          className="h-[48px] w-full rounded-md border border-[#353535] bg-[#171717] px-4 text-[14px] text-white outline-none placeholder:text-[#666666] focus:border-[#ef5350]"
-                        />
-                        <p
-                          className={`mt-2 text-[11px] ${
-                            stopLossPercent === null
-                              ? "text-[#777d87]"
-                              : stopLossPercent < 0
-                                ? "text-[#ef7770]"
-                                : "text-[#ef7770]"
-                          }`}
-                        >
-                          {stopLossPercent === null
-                            ? "Optional"
-                            : `${stopLossPercent.toFixed(2)}% ($${Math.abs(
-                                effectiveEntryPrice -
-                                Number(stopLoss),
-                              ).toFixed(2)})`}
-                        </p>
-                      </div>
-
-
-                      {/* Take Profit */}
-                      <div>
-
-                        <label className="mb-2 block text-[11px] font-medium uppercase tracking-[0.12em] text-[#9a9a9a]">
-                          TAKE PROFIT
-                        </label>
-
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={takeProfit}
-                          onChange={(event) =>
-                            setTakeProfit(event.target.value)
-                          }
-                          placeholder="Optional"
-                          className="h-[48px] w-full rounded-md border border-[#353535] bg-[#171717] px-4 text-[14px] text-white outline-none placeholder:text-[#666666] focus:border-[#22c77a]"
-                        />
-                        <p
-                          className={`mt-2 text-[11px] ${
-                            takeProfitPercent === null
-                              ? "text-[#777d87]"
-                              : "text-[#38c980]"
-                          }`}
-                        >
-                          {takeProfitPercent === null
-                            ? "Optional"
-                            : `${takeProfitPercent >= 0 ? "+" : ""}${takeProfitPercent.toFixed(2)}% ($${Math.abs(
-                                Number(takeProfit) -
-                                effectiveEntryPrice,
-                              ).toFixed(2)})`}
-                        </p>
-                      </div>
-
-
-                      {/* Analyze */}
-                      {/* Bottom Row: Disclaimer + Analyze */}
-                      <div className="col-span-3 flex items-center justify-between pt-1">
-
-                        {/* Disclaimer */}
-                        <div className="flex items-center gap-3 text-[12px] text-[#999999]">
-
-                          <span className="text-[18px] text-[#aaaaaa]">
-                            ♢
-                          </span>
-
-                          <span>
-                            Paper trading via Alpaca
-                          </span>
-
-                          <span className="text-[#555555]">
-                            •
-                          </span>
-
-                          <span>
-                            All trades subject to TradeGuardian risk controls
-                          </span>
-
-                        </div>
-
-
-                        {/* Analyze Button */}
-                        <button
-                          onClick={analyzeTrade}
-                          disabled={analysisLoading}
-                          className="flex h-[48px] w-[205px] shrink-0 items-center justify-between rounded-md bg-[#ffd33d] px-6 text-[13px] font-semibold uppercase tracking-[0.08em] text-[#171717] transition hover:bg-[#ffda5c] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-
-                          <span>
-                            {analysisLoading
-                              ? "ANALYZING..."
-                              : "ANALYZE TRADE"}
-                          </span>
-
-                          <span className="text-[22px] font-normal">
-                            →
-                          </span>
-
-                        </button>
-
-                      </div>
-
-                    </div>
-
-                  </div>
-
-                </section>
-
-                {/* RIGHT: RISK CHECKS */}
-                {/* RIGHT: RISK ANALYSIS + GUARDIAN DECISION */}
-                <div className="col-start-2 row-span-2 row-start-1 flex min-h-0 flex-col gap-3">
-
-                  {/* RISK ANALYSIS */}
-                  <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-[#272b31] bg-[#101010]">
-
-                    {/* Header */}
-                    <div className="flex shrink-0 items-start justify-between border-b border-[#272b31] px-5 py-5">
-
-                      <div className="flex items-center gap-3">
-
-                        <p className="text-[13px] tracking-[0.12em] text-[#a0a4ab]">
-                          RISK ANALYSIS
-                        </p>
-
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#555b65] text-[9px] text-[#8b939e]">
-                          i
-                        </span>
-
-                      </div>
-
-                      <div className="text-right">
-
-                        <div className="flex items-baseline justify-end gap-1">
-
-                          <span className="text-[11px] text-[#a0a4ab]">
-                            Risk Level
-                          </span>
-
-                          <span className="font-mono text-[24px] font-semibold text-[#f0d04f]">
-                            {guardianRisk
-                              ? guardianRisk.score
-                              : "—"}
-                          </span>
-
-                          <span className="text-[12px] text-[#8d939c]">
-                            /100
-                          </span>
-
-                        </div>
-
-                        <p className="mt-1 text-[10px] font-medium tracking-[0.12em] text-[#f0d04f]">
-                          {guardianRisk
-                            ? guardianRisk.level
-                            : "STANDBY"}
-                        </p>
-
-                      </div>
-
-                    </div>
-
-
-                    {/* Checks */}
-                    <div className="risk-analysis-scroll min-h-0 flex-1 overflow-y-auto px-4">
-
-                      <DetailedRiskCheck
-                        number="01"
-                        title="Trade Risk"
-                        subtitle={
-                          analysisResult
-                            ? `$${analysisResult.proposal.trade_value.toLocaleString(
-                                undefined,
-                                {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                },
-                              )} (${analysisResult.risk_metrics.trade_percent_of_equity.toFixed(2)}% of equity)`
-                            : "Waiting for analysis"
-                        }
-                        status={
-                          analysisResult
-                            ? analysisResult.risk_checks.exposure.status === "PASS"
-                              ? "pass"
-                              : "fail"
-                            : "idle"
-                        }
-                      />
-
-
-                      <DetailedRiskCheck
-                        number="02"
-                        title="Position Size"
-                        subtitle={
-                          analysisResult
-                            ? `Recommended: ${analysisResult.risk_metrics.projected_quantity} shares`
-                            : "Waiting for analysis"
-                        }
-                        status={
-                          analysisResult
-                            ? analysisResult.risk_checks.position.status === "PASS"
-                              ? "pass"
-                              : "fail"
-                            : "idle"
-                        }
-                      />
-
-
-                      <DetailedRiskCheck
-                        number="03"
-                        title="Risk / Reward"
-                        subtitle={
-                          riskRewardRatio !== null
-                            ? `Potential R:R  1 : ${riskRewardRatio.toFixed(2)}`
-                            : "Set stop loss and take profit"
-                        }
-                        status={
-                          riskRewardRatio === null
-                            ? "idle"
-                            : riskRewardRatio >= 1.5
-                              ? "pass"
-                              : "warning"
-                        }
-                      />
-
-
-                      <DetailedRiskCheck
-                        number="04"
-                        title="Concentration"
-                        subtitle={
-                          analysisResult
-                            ? `Projected ${symbol} allocation: ${analysisResult.risk_metrics.projected_concentration_percent.toFixed(2)}%`
-                            : "Waiting for analysis"
-                        }
-                        status={
-                          analysisResult
-                            ? analysisResult.risk_checks.concentration.status === "PASS"
-                              ? "pass"
-                              : "fail"
-                            : "idle"
-                        }
-                      />
-
-
-                      <DetailedRiskCheck
-                        number="05"
-                        title="Buying Power"
-                        subtitle={
-                          analysisResult
-                            ? `Trade cost: $${analysisResult.proposal.trade_value.toLocaleString(
-                                undefined,
-                                {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                },
-                              )}`
-                            : "Waiting for analysis"
-                        }
-                        secondaryText={
-                          analysisResult
-                            ? `Available: $${analysisResult.risk_metrics.buying_power.toLocaleString(
-                                undefined,
-                                {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                },
-                              )}`
-                            : undefined
-                        }
-                        status={
-                          analysisResult
-                            ? analysisResult.risk_checks.buying_power.status === "PASS"
-                              ? "pass"
-                              : "fail"
-                            : "idle"
-                        }
-                      />
-
-
-                      <DetailedRiskCheck
-                        number="06"
-                        title="Stop Loss Validity"
-                        subtitle={
-                          parsedStopLoss === null
-                            ? "No stop loss set"
-                            : stopLossValid
-                              ? "Stop loss placement is valid"
-                              : "Stop loss is on the wrong side of entry"
-                        }
-                        status={
-                          parsedStopLoss === null
-                            ? "warning"
-                            : stopLossValid
-                              ? "pass"
-                              : "fail"
-                        }
-                      />
-
-
-                      <DetailedRiskCheck
-                        number="07"
-                        title="Volatility (ATR)"
-                        subtitle="Volatility analysis not yet available"
-                        status="idle"
-                      />
-
-
-                      <DetailedRiskCheck
-                        number="08"
-                        title="Correlation Risk"
-                        subtitle="Portfolio correlation analysis not yet available"
-                        status="idle"
-                      />
-
-
-                      <DetailedRiskCheck
-                        number="09"
-                        title="Drawdown Impact"
-                        subtitle="Projected drawdown analysis not yet available"
-                        status="idle"
-                        last
-                      />
-
-                    </div>
-
-                  </section>
-
-                  {/* GUARDIAN DECISION */}
-                  <section className="shrink-0 rounded-md border border-[#272b31] bg-[#101010] p-5">
-
-                    {/* Header */}
-                    <div className="flex items-center gap-2">
-
-                      <p className="text-[11px] tracking-[0.14em] text-[#9ca3ad]">
-                        GUARDIAN DECISION
-                      </p>
-
-                      <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#555b65] text-[9px] text-[#8b939e]">
-                        i
-                      </span>
-
-                    </div>
-
-
-                    {analysisResult ? (
-
-                      <>
-                        {/* Decision */}
-                        <div className="mt-4 flex items-center gap-3">
-
-                          <span
-                            className={`flex h-7 w-7 items-center justify-center rounded-md ${
-                              analysisResult.decision.status === "APPROVED"
-                                ? "bg-[#143225] text-[#38c980]"
-                                : analysisResult.decision.status === "FLAGGED"
-                                  ? "bg-[#3a3114] text-[#f0d04f]"
-                                  : "bg-[#3a1c1c] text-[#ef5350]"
-                            }`}
-                          >
-                            {analysisResult.decision.status === "APPROVED"
-                              ? "✓"
-                              : analysisResult.decision.status === "FLAGGED"
-                                ? "!"
-                                : "×"}
-                          </span>
-
-
-                          <p
-                            className={`text-[25px] font-semibold tracking-tight ${
-                              analysisResult.decision.status === "APPROVED"
-                                ? "text-[#38c980]"
-                                : analysisResult.decision.status === "FLAGGED"
-                                  ? "text-[#f0d04f]"
-                                  : "text-[#ef5350]"
-                            }`}
-                          >
-                            {analysisResult.decision.status === "APPROVED"
-                              ? "APPROVED"
-                              : analysisResult.decision.status === "FLAGGED"
-                                ? "CAUTION"
-                                : "BLOCKED"}
-                          </p>
-
-                        </div>
-
-
-                        {/* Description */}
-                        <p className="mt-2 text-[13px] leading-5 text-[#a0a4ab]">
-                          {analysisResult.decision.reasons[0]}
-                        </p>
-
-
-                        {/* Metrics */}
-                        <div className="mt-4 grid grid-cols-3 divide-x divide-[#272b31] border-t border-[#272b31] pt-4">
-
-                          <DecisionMetric
-                            label="MAX LOSS"
-                            value={
-                              riskAmount !== null
-                                ? `$${(
-                                    riskAmount *
-                                    Number(quantity || 0)
-                                  ).toFixed(2)}`
-                                : "—"
-                            }
-                            subvalue={
-                              riskAmount !== null &&
-                              effectiveEntryPrice > 0
-                                ? `${(
-                                    (riskAmount /
-                                      effectiveEntryPrice) *
-                                    100
-                                  ).toFixed(2)}% of entry`
-                                : "Set stop loss"
-                            }
-                          />
-
-
-                          <DecisionMetric
-                            label="RISK / REWARD"
-                            value={
-                              riskRewardRatio !== null
-                                ? `1 : ${riskRewardRatio.toFixed(2)}`
-                                : "—"
-                            }
-                            subvalue="Potential ratio"
-                          />
-
-
-                          <DecisionMetric
-                            label="RISK LEVEL"
-                            value={
-                              analysisResult.decision.status === "APPROVED"
-                                ? "LOW"
-                                : analysisResult.decision.status === "FLAGGED"
-                                  ? "MODERATE"
-                                  : "HIGH"
-                            }
-                            subvalue={
-                              analysisResult.decision.status === "APPROVED"
-                                ? "Low Risk"
-                                : analysisResult.decision.status === "FLAGGED"
-                                  ? "Moderate Risk"
-                                  : "High Risk"
-                            }
-                          />
-
-                        </div>
-
-
-                        {/* Review Button */}
-                        <button
-                          type="button"
-                          className="mt-4 flex h-[38px] w-full items-center justify-center gap-4 rounded-md border border-[#b89620] text-[11px] font-semibold tracking-[0.1em] text-[#e6c44a] transition hover:bg-[#1b1b1b]"
-                        >
-                          <span>
-                            REVIEW DETAILS
-                          </span>
-
-                          <span className="text-base">
-                            →
-                          </span>
-                        </button>
-
-                      </>
-
-                    ) : (
-
-                      <div className="mt-5">
-
-                        <p className="text-[25px] font-semibold text-[#a7abb2]">
-                          STANDBY
-                        </p>
-
-                        <p className="mt-2 text-[13px] text-[#7d8797]">
-                          Run analysis to evaluate this trade.
-                        </p>
-
-                      </div>
-
-                    )}
-
-                  </section>
-
-                </div>
-
+                <div className="flex-1" />
               </div>
 
-            </div>
+              {/* Trade Details Panel */}
+              <div className="bg-[#131315] border border-[#2b2a2c] rounded-lg shrink-0 p-4">
+                <h3 className="text-[10px] font-bold text-[#a1a1aa] uppercase tracking-widest mb-6">
+                  TRADE DETAILS
+                </h3>
+                <div className="grid grid-cols-12 gap-6 mb-4">
+                  <div className="col-span-4 space-y-2">
+                    <label className="text-[11px] font-medium text-[#a1a1aa] uppercase">
+                      Symbol
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg
+                          className="w-4 h-4 text-[#a1a1aa]"
+                          fill="currentColor"
+                          viewBox="0 0 384 512"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
+                        </svg>
+                      </div>
+                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                        <svg
+                          className="text-[#a1a1aa]"
+                          fill="none"
+                          height="14"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                          width="14"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </div>
+                      <input
+                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 pl-10 pr-8 text-sm font-medium text-[#e4e4e7] focus:outline-none focus:border-[#2b2a2c] cursor-pointer"
+                        readOnly
+                        type="text"
+                        defaultValue="AAPL"
+                      />
+                    </div>
+                  </div>
 
-          </section>
+                  <div className="col-span-4 space-y-2">
+                    <label className="text-[11px] font-medium text-[#a1a1aa] uppercase">
+                      Side
+                    </label>
+                    <div className="flex bg-[#0e0e10] rounded border border-[#2b2a2c]">
+                      <button className="flex-1 py-2.5 text-xs font-bold text-[#10b981] bg-[#1c2921] border border-[#10b981]/30 rounded shadow-sm">
+                        BUY
+                      </button>
+                      <button className="flex-1 py-2.5 text-xs font-bold text-[#a1a1aa] hover:text-[#e4e4e7] rounded">
+                        SELL
+                      </button>
+                    </div>
+                  </div>
 
-        </div>
+                  <div className="col-span-4 space-y-2">
+                    <label className="text-[11px] font-medium text-[#a1a1aa] uppercase flex justify-between">
+                      Quantity
+                    </label>
+                    <div className="relative">
+                      <input
+                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:border-[#2b2a2c]"
+                        type="number"
+                        defaultValue="10"
+                      />
+                    </div>
+                    <div className="text-[10px] text-[#a1a1aa]/60 mt-1">
+                      Max: 1,247 shares
+                    </div>
+                  </div>
+                </div>
 
-      </div>
-    </main>
-  );
-}
+                <div className="grid grid-cols-12 gap-6 mb-4">
+                  <div className="col-span-4 space-y-2">
+                    <label className="text-[11px] font-medium text-[#a1a1aa] uppercase">
+                      Order Type
+                    </label>
+                    <div className="relative">
+                      <select
+                        defaultValue="Market"
+                        className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:border-[#2b2a2c] appearance-none cursor-pointer"
+                      >
+                        <option value="Market">Market</option>
+                        <option value="Limit">Limit</option>
+                        <option value="Stop">Stop</option>
+                        <option value="Stop Limit">Stop Limit</option>
+                      </select>
+                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                        <svg
+                          className="text-[#a1a1aa]"
+                          fill="none"
+                          height="14"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                          width="14"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
 
+                  <div className="col-span-8 space-y-2">
+                    <label className="text-[11px] font-medium text-[#a1a1aa] uppercase">
+                      Entry Price
+                    </label>
+                    <div className="flex bg-[#0e0e10] rounded border border-[#2b2a2c] overflow-hidden">
+                      <button className="px-6 py-2.5 text-xs font-bold text-[#131315] bg-[#facc15]">
+                        MARKET
+                      </button>
+                      <button className="px-6 py-2.5 text-xs font-bold text-[#a1a1aa] hover:text-[#e4e4e7] border-r border-[#2b2a2c]/50">
+                        LIMIT
+                      </button>
+                      <input
+                        className="flex-1 bg-transparent border-none py-2.5 px-3 text-sm text-[#e4e4e7] focus:outline-none focus:ring-0 text-right opacity-50 cursor-not-allowed"
+                        disabled
+                        placeholder="0.00"
+                        type="text"
+                        defaultValue="0.00"
+                      />
+                    </div>
+                  </div>
+                </div>
 
-/* ACCOUNT METRIC */
+                <div className="grid grid-cols-2 gap-6 mb-4">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-medium text-[#a1a1aa] uppercase">
+                      Stop Loss
+                    </label>
+                    <input
+                      className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#a1a1aa] focus:outline-none focus:border-[#2b2a2c]"
+                      placeholder="Optional"
+                      type="text"
+                    />
+                    <div className="text-[10px] text-[#a1a1aa]/60 mt-1">Price or %</div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-medium text-[#a1a1aa] uppercase">
+                      Take Profit
+                    </label>
+                    <input
+                      className="w-full bg-[#0e0e10] border border-[#2b2a2c] rounded py-2.5 px-3 text-sm text-[#a1a1aa] focus:outline-none focus:border-[#2b2a2c]"
+                      placeholder="Optional"
+                      type="text"
+                    />
+                    <div className="text-[10px] text-[#a1a1aa]/60 mt-1">Price or %</div>
+                  </div>
+                </div>
 
-function AccountMetric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div>
-      <p className="text-[9px] tracking-[0.14em] text-[#667085]">
-        {label}
-      </p>
+                <div className="flex items-center justify-between border-t border-[#2b2a2c] pt-4">
+                  <button className="flex items-center gap-2 text-xs font-medium text-[#facc15] hover:text-[#facc15]/80 transition-colors">
+                    <svg
+                      fill="none"
+                      height="14"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      width="14"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      <path d="m9 12 2 2 4-4" />
+                    </svg>
+                    Advanced Options
+                    <svg
+                      fill="none"
+                      height="12"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      width="12"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                  <button className="flex items-center gap-2 bg-[#facc15] text-[#131315] font-bold text-sm px-8 py-3 rounded hover:bg-[#facc15]/90 transition-colors">
+                    ANALYZE TRADE
+                    <svg
+                      fill="none"
+                      height="16"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      width="16"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path d="M5 12h14" />
+                      <path d="m12 5 7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
 
-      <p className="mt-2 font-mono text-lg font-semibold text-[#e6eaf0]">
-        {value}
-      </p>
-    </div>
-  );
-}
+              {/* Footer Info */}
+              <div className="flex items-center justify-between text-[10px] text-[#a1a1aa]/60 mt-2 px-1">
+                <div className="flex items-center gap-2">
+                  <svg
+                    fill="none"
+                    height="12"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    width="12"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    <path d="m9 12 2 2 4-4" />
+                  </svg>
+                  All trades are subject to TradeGuardian risk controls and market conditions.
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1 h-1 rounded-full bg-[#10b981]" />
+                  Data provided by Alpaca Markets
+                </div>
+              </div>
+            </main>
 
+            {/* BEGIN: Right Side Panels */}
+            <aside
+              className="flex flex-col border-[#2b2a2c] bg-[#131315] shrink-0 h-full p-6 overflow-y-auto custom-scrollbar"
+              style={{ width: '400px' }}
+            >
+              {/* Risk Analysis Panel */}
+              <div className="flex flex-col bg-[#131315] border border-[#2b2a2c] rounded-lg flex-1 mb-4">
+                <div className="flex items-center justify-between p-4 border-b border-[#2b2a2c] shrink-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-[11px] font-bold text-[#a1a1aa] uppercase tracking-widest">
+                      RISK ANALYSIS
+                    </h3>
+                    <svg
+                      className="text-[#a1a1aa]"
+                      fill="none"
+                      height="12"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      width="12"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 16v-4" />
+                      <path d="M12 8h.01" />
+                    </svg>
+                  </div>
+                  <span className="text-[9px] font-bold text-purple-400 border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 rounded">
+                    STANDBY
+                  </span>
+                </div>
 
-/* PIPELINE STEP */
+                <div className="flex-1 p-6 relative overflow-y-auto">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center z-10 bg-[#131315]/80 backdrop-blur-[1px]">
+                    <div className="text-[#a1a1aa] mb-3">
+                      <svg
+                        fill="none"
+                        height="32"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                        viewBox="0 0 24 24"
+                        width="32"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        <path d="m9 12 2 2 4-4" />
+                      </svg>
+                    </div>
+                    <p className="text-xs text-[#a1a1aa]">
+                      Run an analysis to see
+                      <br />
+                      TradeGuardian risk checks.
+                    </p>
+                  </div>
+                </div>
+              </div>
 
-function PipelineStep({
-  number,
-  title,
-  description,
-  last = false,
-}: {
-  number: string;
-  title: string;
-  description: string;
-  last?: boolean;
-}) {
-  return (
-    <div
-      className={`flex gap-4 py-5 ${
-        last
-          ? ""
-          : "border-b border-[#252a33]"
-      }`}
-    >
-
-      <div className="pt-0.5 font-mono text-[10px] text-[#8b9bb4]">
-        {number}
-      </div>
-
-
-      <div className="min-w-0">
-
-        <h4 className="text-sm font-medium text-[#e5e7eb]">
-          {title}
-        </h4>
-
-        <p className="mt-1 text-xs leading-5 text-[#747d8c]">
-          {description}
-        </p>
-
-      </div>
-
-    </div>
-  );
-}
-function MarketStat({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="border-r border-[#252a33] px-5 py-4 last:border-r-0">
-
-      <p className="text-[9px] tracking-[0.14em] text-[#667085]">
-        {label}
-      </p>
-
-      <p className="mt-2 font-mono text-sm text-[#dce1e9]">
-        {value}
-      </p>
-
-    </div>
-  );
-}
-function RiskCheck({
-  number,
-  title,
-  value,
-  status,
-  description,
-  last = false,
-}: {
-  number: string;
-  title: string;
-  value: string;
-  status: "pass" | "fail" | "idle";
-  description: string;
-  last?: boolean;
-}) {
-  const statusStyles = {
-    pass: {
-      badge:
-        "bg-[#143225] text-[#38c980]",
-      icon: "✓",
-    },
-
-    fail: {
-      badge:
-        "bg-[#3a1c1c] text-[#ef5350]",
-      icon: "!",
-    },
-
-    idle: {
-      badge:
-        "bg-[#1b1e22] text-[#a7abb2]",
-      icon: "—",
-    },
-  };
-
-  const currentStatus =
-    statusStyles[status];
-
-  return (
-    <div
-      className={`py-6 ${
-        last
-          ? ""
-          : "border-b border-[#272b31]"
-      }`}
-    >
-
-      <div className="flex items-center justify-between">
-
-        <div className="flex items-center gap-5">
-
-          <span className="text-[18px] font-medium text-[#f0d04f]">
-            {number}
-          </span>
-
-          <div>
-
-            <div className="flex items-center gap-3">
-
-              <span className="text-[16px] text-[#e1e3e7]">
-                {title}
-              </span>
-
-              <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#777b83] text-[10px] text-[#a7abb2]">
-                i
-              </span>
-
-            </div>
-
-            <p className="mt-2 text-[12px] text-[#707780]">
-              {description}
-            </p>
-
+              {/* Guardian Decision Panel */}
+              <div className="flex flex-col shrink-0 bg-[#131315] border border-[#2b2a2c] rounded-lg min-h-[260px]">
+                <div className="flex items-center justify-between p-4 border-b border-[#2b2a2c] shrink-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-[11px] font-bold text-[#e4e4e7] uppercase tracking-widest">
+                      GUARDIAN DECISION
+                    </h3>
+                    <svg
+                      className="text-[#a1a1aa]"
+                      fill="none"
+                      height="12"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      width="12"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 16v-4" />
+                      <path d="M12 8h.01" />
+                    </svg>
+                  </div>
+                  <span className="text-[9px] font-bold text-purple-400 border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 rounded">
+                    STANDBY
+                  </span>
+                </div>
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-[#a1a1aa]">
+                  <div className="text-[#a1a1aa] mb-3">
+                    <svg
+                      fill="none"
+                      height="36"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.5"
+                      viewBox="0 0 24 24"
+                      width="36"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      <path d="m9 12 2 2 4-4" />
+                    </svg>
+                  </div>
+                  <p className="text-xs">
+                    Submit a trade to receive
+                    <br />
+                    TradeGuardian decision.
+                  </p>
+                </div>
+              </div>
+            </aside>
+            {/* END: Right Side Panels */}
           </div>
-
         </div>
-
-
-        <div className="flex flex-col items-end gap-2">
-
-          <span
-            className={`flex min-h-9 min-w-9 items-center justify-center rounded-full px-3 text-[14px] font-medium ${
-              currentStatus.badge
-            }`}
-          >
-            {currentStatus.icon}
-          </span>
-
-          <span className="font-mono text-[12px] text-[#b7bbc2]">
-            {value}
-          </span>
-
-        </div>
-
       </div>
-
     </div>
   );
-}
-function DetailedRiskCheck({
-  number,
-  title,
-  subtitle,
-  secondaryText,
-  status,
-  last = false,
-}: {
-  number: string;
-  title: string;
-  subtitle: string;
-  secondaryText?: string;
-  status: "pass" | "fail" | "warning" | "idle";
-  last?: boolean;
-}) {
-  const styles = {
-    pass: {
-      badge:
-        "bg-[#143225] text-[#38c980]",
-      text: "PASS",
-    },
+};
 
-    fail: {
-      badge:
-        "bg-[#3a1c1c] text-[#ef5350]",
-      text: "FAIL",
-    },
-
-    warning: {
-      badge:
-        "bg-[#3a3114] text-[#f0d04f]",
-      text: "WARNING",
-    },
-
-    idle: {
-      badge:
-        "bg-[#1b1e22] text-[#7d8797]",
-      text: "—",
-    },
-  };
-
-  const current =
-    styles[status];
-
-  return (
-    <div
-      className={`flex items-start gap-3 px-2 py-3 ${
-        last
-          ? ""
-          : "border-b border-[#272b31]"
-      }`}
-    >
-
-      <span className="mt-0.5 font-mono text-[13px] font-medium text-[#e6c44a]">
-        {number}
-      </span>
-
-
-      <div className="min-w-0 flex-1">
-
-        <div className="flex items-center gap-2">
-
-          <p className="text-[14px] font-medium text-[#dfe2e7]">
-            {title}
-          </p>
-
-          <span className="flex h-4 w-4 items-center justify-center rounded-full border border-[#4b515a] text-[9px] text-[#7d8797]">
-            i
-          </span>
-
-        </div>
-
-
-        <p className="mt-1 truncate text-[11px] text-[#9299a3]">
-          {subtitle}
-        </p>
-
-
-        {secondaryText && (
-          <p className="mt-1 text-[11px] text-[#9299a3]">
-            {secondaryText}
-          </p>
-        )}
-
-      </div>
-
-
-      <div className="flex items-center gap-3">
-
-        <span
-          className={`rounded-sm px-3 py-1.5 text-[10px] font-semibold tracking-wide ${
-            current.badge
-          }`}
-        >
-          {current.text}
-        </span>
-
-
-        <span className="text-[#747b85]">
-          ⌄
-        </span>
-
-      </div>
-
-    </div>
-  );
-}
-
-
-function DecisionMetric({
-  label,
-  value,
-  subvalue,
-}: {
-  label: string;
-  value: string;
-  subvalue: string;
-}) {
-  return (
-    <div className="px-3 first:pl-0 last:pr-0">
-
-      <p className="text-[9px] tracking-[0.12em] text-[#747b85]">
-        {label}
-      </p>
-
-      <p className="mt-2 text-[15px] font-semibold text-[#e1e3e7]">
-        {value}
-      </p>
-
-      <p className="mt-1 text-[10px] text-[#8b939e]">
-        {subvalue}
-      </p>
-
-    </div>
-  );
-}
+export default PrecisionInstitutionalTradingSystem;
