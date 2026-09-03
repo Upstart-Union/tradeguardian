@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import AIOpportunity from './pages/ai_opportunity';
 import { Sidebar } from './components/Sidebar';
+import { TradingViewChart } from '../components/TradingViewChart';
 
 // 1. Backend API Response Interfaces
 interface BackendRiskCheckItem {
@@ -159,7 +160,6 @@ export default function TradeAnalysisPage() {
 
   // '8' = Heikin-Ashi (Continuous Candles), '1' = Standard Candles, '3' = Area
   const [chartStyle, setChartStyle] = useState<'8' | '1' | '3'>('8');
-  const chartContainerRef = useRef<HTMLDivElement>(null);
 
   // Alpaca Assets & Symbol Selector state
   const [allAssets, setAllAssets] = useState<AlpacaAsset[]>(DEFAULT_ALPACA_ASSETS);
@@ -253,69 +253,6 @@ export default function TradeAnalysisPage() {
     return `${ex === 'BATS' || ex === 'ARCA' ? 'AMEX' : ex}:${s}`;
   }, [selectedAsset]);
 
-  // TradingView Chart Effect: Zero outlines, live updates
-  useEffect(() => {
-    if (currentView !== 'analysis') return;
-    if (!chartContainerRef.current) return;
-
-    chartContainerRef.current.innerHTML = '';
-
-    const container = document.createElement('div');
-    container.className = 'tradingview-widget-container tradingview-clean-chart';
-    container.style.height = '100%';
-    container.style.width = '100%';
-    container.style.backgroundColor = '#131315';
-
-    const widgetDiv = document.createElement('div');
-    widgetDiv.className = 'tradingview-widget-container__widget';
-    widgetDiv.style.height = '100%';
-    widgetDiv.style.width = '100%';
-    widgetDiv.style.backgroundColor = '#131315';
-    container.appendChild(widgetDiv);
-
-    const script = document.createElement('script');
-    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-    script.type = 'text/javascript';
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      autosize: true,
-      symbol: formattedTradingViewSymbol,
-      interval: selectedTimeframe.value,
-      timezone: 'exchange',
-      colorTheme: 'dark',
-      theme: 'dark',
-      style: chartStyle,
-      locale: 'en',
-      enable_publishing: false,
-      backgroundColor: '#131315',
-      gridColor: 'rgba(43, 42, 44, 0.2)',
-      hide_top_toolbar: true,
-      hide_legend: false,
-      save_image: false,
-      calendar: false,
-      hide_volume: false,
-      support_host: 'https://www.tradingview.com',
-      overrides: {
-        'scalesProperties.textColor': '#a1a1aa',
-        'scalesProperties.lineColor': 'rgba(19, 19, 21, 0)',
-        'paneProperties.separatorColor': 'rgba(19, 19, 21, 0)',
-        'mainSeriesProperties.priceAxisProperties.linesColor': 'rgba(19, 19, 21, 0)',
-        'paneProperties.background': '#131315',
-        'paneProperties.backgroundType': 'solid',
-        'paneProperties.vertGridProperties.color': 'rgba(43, 42, 44, 0.15)',
-        'paneProperties.horzGridProperties.color': 'rgba(43, 42, 44, 0.15)',
-      },
-    });
-
-    container.appendChild(script);
-    chartContainerRef.current.appendChild(container);
-
-    return () => {
-      if (chartContainerRef.current) {
-        chartContainerRef.current.innerHTML = '';
-      }
-    };
-  }, [formattedTradingViewSymbol, selectedTimeframe.value, chartStyle, currentView]);
 
   // TradeGuardian AI Risk Analysis Function
   const handleAnalyzeTrade = async () => {
@@ -567,7 +504,11 @@ export default function TradeAnalysisPage() {
 
                 {/* TradingView Chart Container */}
                 <div className="flex-1 w-full min-h-0 relative overflow-hidden bg-[#131315] border-0 outline-none">
-                  <div ref={chartContainerRef} className="w-full h-full bg-[#131315] border-0 outline-none" />
+                  <TradingViewChart
+                    symbol={formattedTradingViewSymbol}
+                    interval={selectedTimeframe.value}
+                    chartStyle={chartStyle}
+                  />
                 </div>
               </div>
 
